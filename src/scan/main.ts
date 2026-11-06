@@ -1,4 +1,5 @@
 import './scan.css';
+import { enterImmersive, exitImmersive, registerServiceWorker, setupInstall } from './pwa.ts';
 import { DEG, foldAngle } from './geometry.ts';
 import { analyzeFront, analyzeSide, armsRaised, combineAnalyses, hipScale, type FrontAnalysis, type SideAnalysis } from './measure.ts';
 import { allOk, evaluate, Stillness, type Check } from './quality.ts';
@@ -215,6 +216,7 @@ async function runCameraFlow(kind: 'camera' | 'sim') {
   const scenario = params.get('scenario') === 'turn' ? 'turn' : 'orbit';
   const mode = (kind === 'sim' ? scenario : (document.querySelector('input[name="mode"]:checked') as HTMLInputElement).value) as AroundMode | 'profile';
   const handheld = mode === 'orbit';
+  enterImmersive(); // must run inside the tap, before anything is awaited
   abort = new AbortController();
   const { signal } = abort;
   show('capture');
@@ -273,6 +275,7 @@ async function runCameraFlow(kind: 'camera' | 'sim') {
     (window as unknown as { __scan: unknown }).__scan = { report, comparison, trajectory };
   } catch (error) {
     feed?.stop();
+    exitImmersive();
     if ((error as Error).name === 'AbortError') { show('setup'); return; }
     show('setup');
     setupError(cameraMessage(error));
@@ -331,6 +334,7 @@ async function measurePhotos() {
 
 // ---------- results ----------
 function finish() {
+  exitImmersive();
   try { localStorage.setItem(STORE, JSON.stringify(current!.report)); } catch { /* ignore */ }
   show('results');
   renderResults();
@@ -440,4 +444,6 @@ $('height-unit').addEventListener('change', () => {
   input.min = toIn ? '39' : '100'; input.max = toIn ? '91' : '230';
   if (Number.isFinite(v)) input.value = (toIn ? v / CM_PER_INCH : v * CM_PER_INCH).toFixed(1);
 });
+registerServiceWorker();
+setupInstall($('install-card'), $<HTMLButtonElement>('install-app'), $('install-hint'));
 if (params.get('demo') === '1' || params.get('sim') === '1') void runCameraFlow('sim');

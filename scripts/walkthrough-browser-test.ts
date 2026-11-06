@@ -46,7 +46,7 @@ try {
   log(`Screenshots: ${output}`);
   await page.setViewport({ width: 1440, height: 1000 });
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
-  await page.goto(`${base}/?walkthroughSpeed=20`, { waitUntil: 'networkidle0' });
+  await page.goto(`${base}/deck.html?walkthroughSpeed=20`, { waitUntil: 'networkidle0' });
   await expect({ rendered: 'true' });
   for (const [index, step] of walkthroughSteps.entries()) {
     const before = await snapshot(); const start = performance.now();
@@ -102,7 +102,7 @@ try {
   await expect({ walkthroughStatus: 'stopped', dagDepth: '2' });
 
   // N on a slide opens that exact editable node, not a second copy of its graph.
-  await page.goto(`${base}/#interact`, { waitUntil: 'networkidle0' });
+  await page.goto(`${base}/deck.html#interact`, { waitUntil: 'networkidle0' });
   await press(']'); await press('n'); await expect({ openNode: 'demo-2', dagDepth: '3', dagNodeCount: '0' });
   await press('c'); await expect({ dagNodeCount: '1' });
   await press('t'); await expect({ openNode: 'interact/select', dagNodeCount: '5', dagSelected: 'demo-2' });
@@ -110,7 +110,7 @@ try {
   await press('t'); await expect({ mode: 'dag', openNode: 'interact', dagSelected: 'interact/select' });
 
   // Exercise actual recursive creation/opening in the browser, including empty interiors.
-  await page.goto(`${base}/?mode=dag&layer=interact%7Cinteract/edit%7Cinteract/edit/create`, { waitUntil: 'networkidle0' });
+  await page.goto(`${base}/deck.html?mode=dag&layer=interact%7Cinteract/edit%7Cinteract/edit/create`, { waitUntil: 'networkidle0' });
   await expect({ dagDepth: '3', dagNodeCount: '0' });
   for (let depth = 4; depth <= 35; depth++) {
     const parent = (await snapshot()).openNode;
@@ -126,7 +126,7 @@ try {
   await page.screenshot({ path: join(output, 'root-plane.png') });
 
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
-  await page.goto(`${base}/?mode=dag&layer=interact%7Cinteract/edit%7Cinteract/edit/create`, { waitUntil: 'networkidle0' });
+  await page.goto(`${base}/deck.html?mode=dag&layer=interact%7Cinteract/edit%7Cinteract/edit/create`, { waitUntil: 'networkidle0' });
   await page.click('#dag-create'); await expect({ dagNodeCount: '1' });
   await page.click('#dag-enter'); await expect({ dagDepth: '4', dagNodeCount: '0' });
   await page.click('#dag-parent'); await expect({ dagDepth: '3', dagNodeCount: '1' });

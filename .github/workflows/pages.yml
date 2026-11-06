@@ -1,19 +1,18 @@
-# Builds the site and publishes it to GitHub Pages (https is required for phone camera access).
-# One-time setup: repository Settings → Pages → Source: "GitHub Actions".
+# Builds the site and publishes it to the gh-pages branch, which GitHub Pages serves at
+# https://<owner>.github.io/<repo>/ (https is required for phone camera access and for installing the app).
+# If Pages is not on yet: repository Settings → Pages → Source: "Deploy from a branch", branch gh-pages, folder /.
 name: Deploy to GitHub Pages
 on:
   push:
-    branches: [main]
+    branches: [main, body-scan]
   workflow_dispatch:
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 concurrency:
   group: pages
   cancel-in-progress: true
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,15 +25,13 @@ jobs:
       - run: npm run build
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish dist/ to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          touch dist/.nojekyll
+          cd dist
+          git init -q -b gh-pages
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Deploy ${GITHUB_SHA} from ${GITHUB_REF_NAME}"
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages

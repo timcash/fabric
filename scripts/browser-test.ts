@@ -32,7 +32,7 @@ const state = async (name: string) => page.$eval('#scene', (element, key) => (el
 try {
   log(`Screenshot directory: ${output}`);
   await page.setViewport({ width: 1440, height: 1000 });
-  await page.goto(`${origin}/?tourDuration=900`, { waitUntil: 'networkidle0' });
+  await page.goto(`${origin}/deck.html?tourDuration=900`, { waitUntil: 'networkidle0' });
   await page.waitForSelector('#scene[data-rendered="true"]');
   assert.equal(await page.$$eval('#scene canvas', nodes => nodes.length), 1);
   assert.equal(await page.$$eval('#slide-progress button', nodes => nodes.length), 5);
@@ -122,7 +122,7 @@ try {
   log('Autoplay takeover, Escape, completion, guide scrolling, source text, and focus restoration pass.');
 
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
-  await page.goto(`${origin}/#welcome`, { waitUntil: 'networkidle0' });
+  await page.goto(`${origin}/deck.html#welcome`, { waitUntil: 'networkidle0' });
   await page.waitForSelector('#scene[data-rendered="true"]');
   await delay(600);
   await page.screenshot({ path: join(output, 'mobile-welcome.png') });
@@ -142,7 +142,7 @@ try {
   await page.screenshot({ path: join(output, 'mobile-guide.png') });
   await page.click('#close-guide');
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
-  await page.goto(`${origin}/#playback`, { waitUntil: 'networkidle0' });
+  await page.goto(`${origin}/deck.html#playback`, { waitUntil: 'networkidle0' });
   await expectSlide('playback');
   assert.equal(await state('motion'), 'reduced');
   assert.equal(await page.$eval('body', body => body.dataset.playing), 'false');

@@ -72,7 +72,7 @@ function log(message: string) {
 try {
   log(`Screenshot directory: ${output}`);
   await page.setViewport({ width: 1440, height: 1000 });
-  await page.goto(`${base}/?tourDuration=900`, { waitUntil: 'networkidle0' });
+  await page.goto(`${base}/deck.html?tourDuration=900`, { waitUntil: 'networkidle0' });
   await page.click('#play'); await page.click('#mode-toggle'); await mode('dag');
   assert.equal(await page.$eval('body', body => body.dataset.playing), 'false');
   await delay(1200);
@@ -105,7 +105,7 @@ try {
   }
   log('All five slides and nested nodes show their actual live Slide-mode meshes at Full content; selection, opening, parenting, and presentation use one canvas.');
 
-  await page.goto(`${base}/?mode=dag#interact`, { waitUntil: 'networkidle0' });
+  await page.goto(`${base}/deck.html?mode=dag#interact`, { waitUntil: 'networkidle0' });
   await delay(1000); await page.keyboard.press('n'); await waitData('dagDepth', '1'); await delay(1000);
   await clickNode('interact/edit'); await page.keyboard.press('n'); await waitData('dagDepth', '2'); await delay(1100);
   assert.equal(await data('dagNodeCount'), '3');
@@ -152,7 +152,7 @@ try {
   log('Two nesting depths, parent restoration, DAG deep links, all LOD bands, wheel zoom, edit preservation, and top-to-bottom slide order pass.');
 
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
-  await page.goto(`${base}/?mode=dag#welcome`, { waitUntil: 'networkidle0' }); await delay(1200);
+  await page.goto(`${base}/deck.html?mode=dag#welcome`, { waitUntil: 'networkidle0' }); await delay(1200);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.screenshot({ path: join(output, 'mobile-dag.png') });
   await page.select('#dag-lod', '0'); await waitData('dagLod', 'graph-point'); await delay(1200);

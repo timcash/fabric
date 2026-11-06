@@ -49,7 +49,7 @@ function check(rows: Comparison[], l: (typeof LIMITS)['oracle']): string[] {
 }
 
 async function run(page: Page, detector: 'mediapipe' | 'oracle', scenario: 'orbit' | 'turn' = 'orbit'): Promise<Run> {
-  await page.goto(`${origin}/scan.html?detector=${detector}&scenario=${scenario}`, { waitUntil: 'load' });
+  await page.goto(`${origin}/?detector=${detector}&scenario=${scenario}`, { waitUntil: 'load' });
   await sleep(1500);
   await page.click('#start-demo');
   await page.waitForFunction(() => document.body.dataset.screen === 'capture', { timeout: 30000 });

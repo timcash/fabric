@@ -47,9 +47,38 @@ const screen = (page: Page, name: string) => page.waitForFunction(n => document.
 
 try {
   log(`Screenshots: ${output}`);
+  // 0. Installable app: manifest, icons, service worker, and the app shell loading offline.
+  {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 393, height: 852, isMobile: true, hasTouch: true });
+    await page.goto(`${origin}/`, { waitUntil: 'networkidle0' });
+    const manifestUrl = await page.$eval('link[rel="manifest"]', e => (e as HTMLLinkElement).href);
+    const manifest = await (await fetch(manifestUrl)).json() as { display: string; start_url: string; name: string; short_name: string; icons: { src: string; sizes: string; purpose?: string }[] };
+    assert.equal(manifest.display, 'fullscreen');
+    assert.ok(manifest.short_name.length <= 12, 'home-screen name fits');
+    for (const size of ['192x192', '512x512']) assert.ok(manifest.icons.some(i => i.sizes === size && i.purpose !== 'maskable'), `${size} icon`);
+    assert.ok(manifest.icons.some(i => i.purpose === 'maskable'), 'maskable icon');
+    for (const icon of manifest.icons) {
+      const r = await fetch(new URL(icon.src, manifestUrl));
+      assert.equal(r.status, 200, icon.src);
+      assert.match(r.headers.get('content-type') ?? '', /^image\//, icon.src);
+    }
+    assert.equal(await page.$eval('link[rel="apple-touch-icon"]', e => (e as HTMLLinkElement).href.endsWith('apple-touch-icon.png')), true);
+    const state = await page.evaluate(async () => (await navigator.serviceWorker.ready).active?.state);
+    assert.equal(state, 'activated', 'service worker active');
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.setOfflineMode(true);
+    await page.reload({ waitUntil: 'load' });
+    assert.equal(await page.title(), 'Fabric Body Scan', 'app shell loads offline');
+    assert.equal(await page.$eval('#setup', e => (e as HTMLElement).hidden), false);
+    await page.setOfflineMode(false);
+    await page.screenshot({ path: join(output, '0-installable.png') });
+    log('installable: manifest, icons and offline shell OK');
+    await page.close();
+  }
   // 1. Simulated scan on a phone viewport (exact-mask oracle: fast and deterministic; see test:sim for MediaPipe)
   {
-    const { page, errors } = await open('/scan.html?detector=oracle');
+    const { page, errors } = await open('/?detector=oracle');
     await page.screenshot({ path: join(output, '1-setup.png'), fullPage: true });
     assert.equal(await page.$eval('#units', e => e.textContent), 'cm');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
@@ -92,7 +121,7 @@ try {
   }
   // 2. Photo mode: MediaPipe under CSP
   {
-    const { page, errors } = await open('/scan.html');
+    const { page, errors } = await open('/');
     if (await page.$eval('#units', e => e.textContent) === 'in') await page.click('#units'); // step 1 switched to inches
     await page.select('#height-unit', 'cm');
     await page.type('#height', String(meshTruth.height));
@@ -121,7 +150,7 @@ try {
   }
   // 3. Camera mode with Chrome's fake camera
   {
-    const { page, errors } = await open('/scan.html');
+    const { page, errors } = await open('/');
     await page.select('#height-unit', 'cm');
     await page.type('#height', '180');
     await page.click('#start-camera');

@@ -1,15 +1,37 @@
 # Fabric — phone body scan
 
-Fabric starts from [timcash/template](https://github.com/timcash/template) (Vite + TypeScript + Three.js, copied at `be59c4f`). It adds **Body Scan** ([scan.html](scan.html)), a browser app that measures a human body with a phone camera. Everything runs on the device. No frames are uploaded.
+<img src="public/brand/logo.svg" alt="" width="72" align="right" />
+
+**Fabric Body Scan** measures a body with a phone camera: arms out, one walk around, and 11 girths and 8 lengths, computed on the device. No frames are uploaded.
+
+**Open it on your phone: <https://timcash.github.io/fabric/>.** Then install it to the home screen:
+
+- **Android Chrome:** tap **Install** on the page, or use menu → Install app.
+- **iPhone Safari:** tap Share → Add to Home Screen.
+
+Installed, it opens full screen in portrait and works offline. The pose model is cached after the first scan.
+
+Fabric started from [timcash/template](https://github.com/timcash/template) (Vite + TypeScript + Three.js, copied at `be59c4f`). The scanner is the home page ([index.html](index.html)); the template's slide deck lives at [deck.html](deck.html).
 
 ```sh
 npm ci
 npm run dev      # also fetches the pose model into public/mediapipe/
-# open http://127.0.0.1:5173/scan.html  (a phone needs https: deploy, or tunnel the dev server)
+# open http://127.0.0.1:5173/  (a phone needs https: deploy, or tunnel the dev server)
 npm run test:sim # simulated scan of a 3D body, scored against the mesh, recorded as a video
 ```
 
-The deck's masthead links to the scanner. **Simulate a scan (3D body)** runs the whole app on a rendered CC0 human mesh in a furnished room, with a helper walking around, instead of the camera. Use `/scan.html?sim=1`; add `&detector=oracle` for exact masks or `&scenario=turn` for the turn-on-the-spot setup.
+**Simulate a scan (3D body)** runs the whole app on a rendered CC0 human mesh in a furnished room, with a helper walking around, instead of the camera. Use `/?sim=1`; add `&detector=oracle` for exact masks or `&scenario=turn` for the turn-on-the-spot setup.
+
+### Installable app (PWA)
+
+| Piece | What it does |
+| --- | --- |
+| [public/manifest.webmanifest](public/manifest.webmanifest) | Name "Fabric Body Scan" (home screen: "Fabric Scan"); opens `fullscreen`, falling back to `standalone`; portrait; dark theme; regular and maskable icons; a "Simulate a scan" shortcut. |
+| [scripts/service-worker.ts](scripts/service-worker.ts) | Generated into `sw.js` at build time. It precaches that build's exact hashed files and the icons, network-first for pages so new deploys show up, and caches the MediaPipe runtime, model and simulation mesh on first use for offline scans. |
+| [src/scan/pwa.ts](src/scan/pwa.ts) | Registers the worker and offers **Install** (Android/desktop Chrome) or the Share → Add to Home Screen hint (iOS). During capture it requests fullscreen, locks portrait and keeps the screen awake. |
+| [public/brand/](public/brand) | The logo: a T-pose figure, the app's scan pose, with a tape ring at the waist. Includes 192/512, maskable and Apple touch icons, and a share card. `scripts/make-icons.ts` re-renders the PNGs from the SVGs. |
+
+On phones the capture screen fills the display. The guidance sits above the camera and the controls below it, so the whole frame, head to feet, stays visible. The layout respects notch and home-bar safe areas.
 
 ## How a scan works: arms out, the whole time
 
@@ -84,19 +106,20 @@ A rendered mannequin is not a person in clothes, so real-world error will be lar
 | `src/scan/geometry.ts`, `mask.ts` | Ellipse/Cauchy perimeters; sub-pixel runs, chords, connected vertical extent |
 | `src/scan/quality.ts` | Live capture checks, including arms out |
 | `src/scan/pose-mediapipe.ts`, `feeds.ts` | Self-hosted MediaPipe, camera feed, tilt |
-| `src/scan/main.ts`, `scan.html`, `scan.css` | Capture flow and results UI |
+| `src/scan/main.ts`, `index.html`, `scan.css` | Capture flow and results UI |
+| `src/scan/pwa.ts`, `public/manifest.webmanifest`, `scripts/service-worker.ts` | Installable app: install prompt, fullscreen and wake lock, offline cache |
 | `src/scan/view3d.ts`, `capture-package.ts` | 3D cross-sections (with the true mesh in simulation); zip export for splatting |
 | `src/scan/synthetic.ts` | Orthographic parametric body for fast geometry unit tests |
 | `src/sim/makehuman.ts`, `camera.ts`, `truth.ts`, `compare.ts` | Mesh loading and posing, pinhole camera and rasterizer, mesh slicing, scoring |
 | `src/sim/sim-feed.ts`, `observe.ts` | three.js render feed (MediaPipe or oracle; room + helper, or turn) and exact observations |
 | `src/sim/room.ts`, `path.ts` | The furnished room; the helper's handheld walk and gravity-sensor noise |
 | `scripts/sim-oracle.ts`, `scripts/sim-video-test.ts` | Node simulation; recorded browser simulation |
-| `scripts/scan-browser-test.ts` | Phone-size browser test under the production CSP: simulated scan, photo mode on rendered photos, fake camera |
+| `scripts/scan-browser-test.ts` | Phone-size browser test under the production CSP: installable app and offline shell, simulated scan, photo mode on rendered photos, fake camera |
 | `scripts/prepare-pose-assets.ts` | Copies the WASM runtime and downloads `pose_landmarker_full.task` (runs before dev/build) |
 
 **Run it on a phone.** The camera needs https, so pick one of these:
 
-- **GitHub Pages:** in repository Settings → Pages, set Source to *GitHub Actions*. [.github/workflows/pages.yml](.github/workflows/pages.yml) then deploys on every push to `main`, building with `BASE_PATH=/<repo>/`. Open `https://<user>.github.io/fabric/scan.html`.
+- **GitHub Pages:** live at <https://timcash.github.io/fabric/>. [.github/workflows/pages.yml](.github/workflows/pages.yml) builds with `BASE_PATH=/<repo>/` on every push to `main` or `body-scan` and publishes `dist/` to the `gh-pages` branch. If Pages isn't on, set Settings → Pages → Source to *Deploy from a branch*, branch `gh-pages`, folder `/`.
 - **Cloudflare:** rename the Worker in `wrangler.jsonc` if you like, then run `npm run deploy`. `public/_headers` allows `camera=(self)` and `'wasm-unsafe-eval'`; everything else stays `'self'`.
 - **Local:** run `npm run dev -- --host` and reach it through an https tunnel. Plain-http LAN addresses get no camera.
 

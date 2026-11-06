@@ -2,73 +2,144 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#080b10" />
-    <meta name="description" content="Five interactive examples for a reusable Vite, TypeScript, and Three.js slide interface. Explore navigation, editable scenes, playback, and a guide." />
-    <meta property="og:title" content="Slide Template — One canvas. Five possibilities." />
-    <meta property="og:description" content="An interactive starting point for stories in three dimensions." />
-    <meta property="og:type" content="website" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="description" content="Measure a body with your phone camera: arms out, one walk around, and 11 girths and 8 lengths, computed on the device." />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>Slide Template — Five interactive examples</title>
+    <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Fabric Scan" />
+    <meta property="og:title" content="Fabric Body Scan" />
+    <meta property="og:description" content="Measure a body with your phone camera. Arms out, one walk around, on-device." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://timcash.github.io/fabric/brand/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <title>Fabric Body Scan</title>
   </head>
-  <body>
-    <a class="skip-link" href="#slide-title">Skip to slide</a>
-    <div id="scene" aria-hidden="true"></div>
-    <div class="scene-shade" aria-hidden="true"></div>
-    <header class="masthead">
-      <a class="wordmark" id="home" href="#welcome" aria-label="Slide Template home">SLIDE<span>TEMPLATE</span></a>
-      <div class="header-tools"><a class="guide-link" id="open-scan" href="scan.html">Body scan <span aria-hidden="true">↗</span></a><button id="start-walkthrough" class="mode-toggle" aria-pressed="false" title="Controls walkthrough (W)">Tour</button><button id="mode-toggle" class="mode-toggle" aria-pressed="false">DAG mode</button><button class="guide-link" id="open-guide">Guide <span aria-hidden="true">↗</span></button></div>
+  <body class="scan-app" data-screen="setup">
+    <header class="scan-bar">
+      <a class="wordmark" href="./" aria-label="Fabric Body Scan home"><img src="/brand/logo.svg" alt="" width="28" height="28" />FABRIC<span>BODY SCAN</span></a>
+      <button id="units" class="chip" aria-label="Switch units">cm</button>
     </header>
+
     <main>
-      <section class="slide" aria-labelledby="slide-title" aria-roledescription="slide">
-        <div class="eyebrow"><span class="status-dot" aria-hidden="true"></span> INTERACTIVE STARTER <span class="divider">/</span> FIVE EXAMPLES</div>
-        <div class="slide-copy" aria-live="polite" aria-atomic="true">
-          <p class="slide-label" id="slide-label">01 — THE STARTING POINT</p>
-          <h1 id="slide-title" tabindex="-1">One canvas.<br /><span>Five possibilities.</span></h1>
-          <p class="description" id="slide-description">A starting point for stories in three dimensions. Explore five examples, then make the content, models, and motion your own.</p>
-          <dl class="slide-facts" id="slide-facts"></dl>
-          <p class="footnote" id="slide-note">Scroll once or press → to begin. Drag the scene to look around.</p>
+      <section id="setup" class="screen" aria-labelledby="setup-title">
+        <p class="eyebrow">On-device · nothing is uploaded</p>
+        <h1 id="setup-title">Measure a body<br /><span>with a phone camera.</span></h1>
+        <p class="lede">Stand with both arms straight out to the sides for the whole scan. A helper takes one front view, then walks a slow circle around you about 2.5 m away, keeping you head to feet in frame. No helper? Prop the phone and turn on the spot. Your height sets the metric scale; the phone's motion sensor levels every frame.</p>
+        <form id="setup-form" class="card" novalidate>
+          <div class="field">
+            <label for="height">Height</label>
+            <div class="height-row">
+              <input id="height" name="height" type="number" inputmode="decimal" min="100" max="230" step="0.1" placeholder="175" required />
+              <select id="height-unit" aria-label="Height unit"><option value="cm">cm</option><option value="in">in</option></select>
+            </div>
+            <p class="hint" id="height-hint">Barefoot, without hair volume. Every length scales with this number.</p>
+          </div>
+          <fieldset class="field">
+            <legend>Camera</legend>
+            <label class="radio"><input type="radio" name="facing" value="environment" checked /> Rear (someone else holds or props the phone)</label>
+            <label class="radio"><input type="radio" name="facing" value="user" /> Front / selfie (scan yourself; phone propped)</label>
+          </fieldset>
+          <fieldset class="field">
+            <legend>How will you scan?</legend>
+            <label class="radio"><input type="radio" name="mode" value="orbit" checked /> A helper walks around you with the phone (recommended)</label>
+            <label class="radio"><input type="radio" name="mode" value="turn" /> Prop the phone and turn on the spot</label>
+            <label class="radio"><input type="radio" name="mode" value="profile" /> Quick: front and side only</label>
+          </fieldset>
+          <label class="toggle"><input type="checkbox" id="voice" checked /> Spoken prompts</label>
+          <p class="error" id="setup-error" role="alert" hidden></p>
+          <div class="actions">
+            <button type="submit" class="primary" id="start-camera">Start camera scan</button>
+            <button type="button" class="secondary" id="start-demo">Simulate a scan (3D body)</button>
+          </div>
+        </form>
+        <details class="card" id="photo-mode">
+          <summary>Measure two photos instead</summary>
+          <p class="hint">A front photo and a side photo, both with arms straight out to the sides and feet apart: full body, phone upright, same spot.</p>
+          <label class="file">Front photo <input type="file" id="front-photo" accept="image/*" /></label>
+          <label class="file">Side photo (optional) <input type="file" id="side-photo" accept="image/*" /></label>
+          <button type="button" class="secondary" id="measure-photos">Measure photos</button>
+        </details>
+        <div class="card install" id="install-card" hidden>
+          <img src="/brand/icon-192.png" alt="" width="48" height="48" />
+          <div><strong>Install Fabric Scan</strong><p class="hint" id="install-hint">Add it to your home screen: it opens full screen and works offline.</p></div>
+          <button type="button" class="primary" id="install-app" hidden>Install</button>
         </div>
-        <button class="slide-action" id="slide-action">Explore the examples <span aria-hidden="true">↗</span></button>
-        <button class="slide-secondary" id="reset-graph" hidden>Reset graph</button>
+        <ol class="tips">
+          <li><strong>Arms straight out to the sides, palms down,</strong> for the whole scan. Frames with arms down are not measured.</li>
+          <li><strong>Fitted clothing.</strong> The mask follows fabric: loose clothes read as body.</li>
+          <li><strong>Plain, uncluttered background</strong> and even light.</li>
+          <li><strong>Phone upright</strong> (level indicator turns green) at about waist height.</li>
+          <li><strong>Whole body in frame</strong> with a little space above the head and below the feet.</li>
+        </ol>
+        <footer class="site-footer">
+          <img src="/brand/logo.svg" alt="" width="20" height="20" /> Fabric Body Scan ·
+          <a href="https://github.com/timcash/fabric/blob/main/docs/body-scan-research.md">Research notes</a> ·
+          <a href="https://github.com/timcash/fabric">Source</a> ·
+          <a href="deck.html">Template deck</a>
+        </footer>
       </section>
-      <div class="scene-caption" aria-hidden="true"><span class="caption-cross">+</span><span id="scene-caption">MODULAR ASSEMBLY<span>EXAMPLE / 01</span></span></div>
-      <p class="scene-fallback" id="scene-fallback" hidden>The 3D view is unavailable on this device. Slides, controls, and the guide are still available.</p>
-      <p class="sr-only" id="interaction-status" role="status" aria-live="polite"></p>
-      <section id="dag-header" class="dag-header" hidden aria-labelledby="dag-title">
-        <div class="dag-heading"><h1 id="dag-title">Slides, connected.</h1><span id="dag-depth">Root workplane</span></div>
-        <nav id="dag-breadcrumb" aria-label="Workplane path"></nav>
-        <p id="dag-selection" role="status" aria-live="polite"></p>
-        <nav id="dag-node-list" class="sr-only" aria-label="Slide graph nodes"></nav>
+
+      <section id="capture" class="screen" hidden aria-labelledby="step-title">
+        <div class="hud-top">
+          <p class="step-count" id="step-count"></p>
+          <h2 id="step-title"></h2>
+          <p id="step-instruction" aria-live="polite"></p>
+        </div>
+        <div class="stage" id="stage">
+          <video id="video" playsinline muted hidden></video>
+          <canvas id="live" aria-label="Camera view with body outline"></canvas>
+          <div class="countdown" id="countdown" aria-hidden="true"></div>
+        </div>
+ <div class="hud">
+          <ul class="checks" id="checks" aria-label="Capture checks"></ul>
+          <div class="turn-dial" id="turn-dial" hidden><svg viewBox="-50 -50 100 100" aria-hidden="true"><g id="dial-bins"></g></svg><span id="dial-label">0%</span></div>
+          <p class="status" id="capture-status" role="status"></p>
+          <div class="actions">
+            <button type="button" class="primary" id="capture-now">Capture now</button>
+            <button type="button" class="secondary" id="cancel-scan">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="results" class="screen" hidden aria-labelledby="results-title">
+        <p class="eyebrow" id="results-source">Results</p>
+        <h1 id="results-title">Your measurements</h1>
+        <div class="summary" id="summary"></div>
+        <ul class="warnings" id="warnings"></ul>
+        <div class="results-grid">
+          <div class="card table-card">
+            <table id="measurements"><thead><tr><th scope="col">Measurement</th><th scope="col">Value</th><th scope="col">±</th><th scope="col">Method</th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="card views">
+            <div class="view3d" id="view3d" aria-label="3D cross-sections of the measured body"></div>
+            <div class="thumbs"><figure><canvas id="front-view"></canvas><figcaption>Front</figcaption></figure><figure id="side-figure"><canvas id="side-view"></canvas><figcaption>Profile</figcaption></figure></div>
+            <figure id="path-figure" hidden><svg id="path-plot" viewBox="-360 -360 720 720" role="img" aria-label="Top view: the subject in the centre and the camera path around them"></svg><figcaption id="path-caption"></figcaption></figure>
+          </div>
+        </div>
+        <div class="actions export">
+          <button type="button" class="secondary" id="download-csv">Download CSV</button>
+          <button type="button" class="secondary" id="download-json">Download JSON</button>
+          <button type="button" class="secondary" id="download-package" hidden>Capture package for splatting (.zip)</button>
+          <button type="button" class="primary" id="new-scan">New scan</button>
+        </div>
+        <details class="card method">
+          <summary>How these numbers are made</summary>
+          <ul>
+            <li><strong>Scale:</strong> the person mask’s head-to-heel span in the front frame equals your height, giving centimetres per pixel at your body plane.</li>
+            <li><strong>Levels:</strong> pose landmarks place the neck (mid-neck), chest (27% down the torso), waist (narrowest), hip (fullest, near the hip joints), thigh (3 cm below the crotch), knee, calf and ankle.</li>
+            <li><strong>Turntable girths:</strong> while you turn with arms out, each frame gives the torso’s and each leg’s caliper width from one angle. A tape follows the convex outline, whose perimeter is the integral of those widths over half a turn (Cauchy’s formula), so no ellipse is assumed. Each leg uses its own landmarks to correct for perspective as it swings nearer or farther.</li>
+            <li><strong>Two-view girths:</strong> front width and profile depth, with an elliptical cross-section.</li>
+            <li><strong>±</strong> is a design estimate per method, not a validated accuracy. Clothing, hair, posture and camera tilt dominate real-world error.</li>
+          </ul>
+        </details>
       </section>
     </main>
-    <footer class="navigation">
-      <div class="navigation-heading"><span id="slide-count">01 / 05</span><span class="nav-hint">Scroll to explore <span aria-hidden="true">↓</span></span></div>
-      <nav class="slide-progress" id="slide-progress" aria-label="Example slides"></nav>
-      <div class="transport">
-        <button id="previous" aria-label="Previous slide" disabled>↑</button>
-        <button id="play" aria-label="Play automatic tour" aria-pressed="false"><span id="play-icon" aria-hidden="true">▷</span><span id="play-label">Play tour</span></button>
-        <button id="next" aria-label="Next slide">↓</button>
-      </div>
-    </footer>
-    <div id="dag-controls" class="dag-controls" hidden>
-      <span class="dag-help">N: open · T: parent · C: create · X: color · ?: all hotkeys</span>
-      <div class="dag-buttons">
-        <button id="dag-parent">↑ Parent</button><button id="dag-overview">Root</button>
-        <button id="dag-zoom-out" aria-label="Zoom out">−</button><button id="dag-zoom-in" aria-label="Zoom in">+</button>
-        <label class="sr-only" for="dag-lod">Detail level</label><select id="dag-lod" aria-label="Detail level"><option value="auto">Frame node</option><option value="0">Points</option><option value="1">Summaries</option><option value="2">Full content</option></select>
-        <button id="dag-enter">Open node</button><button id="dag-create">Create</button><button id="dag-remove">Delete</button><button id="dag-trace" aria-pressed="false">Trace</button><button id="dag-present">Present</button>
-      </div>
-    </div>
-    <aside id="walkthrough" hidden aria-label="Controls walkthrough">
-      <div class="walkthrough-meta"><span id="walkthrough-count"></span><kbd id="walkthrough-input"></kbd><button id="stop-walkthrough">Stop / close</button></div>
-      <h2 id="walkthrough-title"></h2><p id="walkthrough-instruction" aria-live="polite"></p>
-    </aside>
-    <dialog id="guide-dialog" aria-labelledby="guide-title">
-      <div class="guide-toolbar"><span id="guide-title">THE TEMPLATE GUIDE</span><button id="close-guide" aria-label="Close guide">Close <span aria-hidden="true">×</span></button></div>
-      <article id="guide-content"></article>
-    </dialog>
-    <noscript><article class="no-script"><h1>Slide Template</h1><p>Five examples: an opening scene, slide navigation, an editable graph, automatic playback, and a content guide.</p><p><a href="/guide.md">Read the guide</a>, or enable JavaScript to use the interactive examples.</p></article></noscript>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/scan/main.ts"></script>
   </body>
 </html>
