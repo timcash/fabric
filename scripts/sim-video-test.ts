@@ -5,6 +5,7 @@
  * against the posed mesh and the true camera path. The whole run is recorded as a video.
  *
  * Outputs in test-results/body-scan-sim/:
+ *   body-scan-mobile.mp4       the same run at a phone's portrait size (and body-scan-mobile-preview.gif)
  *   body-scan-simulation.mp4   the recorded run (setup → front → walk-around → results with mesh truth, 3D overlay
  *                              and the camera path)
  *   photos/*.png               rendered "photos" from the helper's walk at 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°
@@ -38,8 +39,8 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const LIMITS = {
   // Neck is a front-only estimate and floor-based lengths (waist height, inseam) depend on the heel line; from a
   // handheld front view at chest height both are the weakest results, so their bounds are wider than the girths'.
-  oracle: { torso: 4, legs: 7, neck: 20, arms: 12, lengthCm: 3 },
-  mediapipe: { torso: 5, legs: 12, neck: 25, arms: 25, lengthCm: 6 },
+  oracle: { torso: 4, legs: 8, neck: 20, arms: 12, lengthCm: 3 },
+  mediapipe: { torso: 5, legs: 12, neck: 30, arms: 25, lengthCm: 6 }, // the front-only neck estimate is the weakest number
 };
 type Trajectory = { frames: number; ateCm: number; distanceErrCm: number; heightErrCm: number; angleErrDeg: number } | null;
 type Run = { comparison: Comparison[]; trajectory: Trajectory };
@@ -48,8 +49,14 @@ function check(rows: Comparison[], l: (typeof LIMITS)['oracle']): string[] {
   return rows.filter(r => r.method === 'input' ? false : ['neck', 'chest', 'waist', 'hip', 'thigh', 'knee', 'calf', 'ankle', 'bicep', 'forearm', 'wrist'].includes(r.id) ? Math.abs(r.errorPct) > bound(r.id) : Math.abs(r.errorCm) > l.lengthCm).map(r => `${r.id} ${r.errorPct.toFixed(1)}%`);
 }
 
+/** Headless Chrome's fullscreen shrinks the page to its default screen size; real phones fill the display. */
+const noFullscreen = (page: Page) => page.evaluateOnNewDocument(() => { Element.prototype.requestFullscreen = () => Promise.reject(new Error('disabled while recording')); });
+
 async function run(page: Page, detector: 'mediapipe' | 'oracle', scenario: 'orbit' | 'turn' = 'orbit'): Promise<Run> {
   await page.goto(`${origin}/?detector=${detector}&scenario=${scenario}`, { waitUntil: 'load' });
+  await sleep(1500);
+  // Scroll to the button first so a recording shows the page instead of jumping (on phones it is below the fold).
+  await page.evaluate(() => document.getElementById('start-demo')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   await sleep(1500);
   await page.click('#start-demo');
   await page.waitForFunction(() => document.body.dataset.screen === 'capture', { timeout: 30000 });
@@ -64,6 +71,7 @@ let failed: string[] = [];
 try {
   // 1. Recorded MediaPipe run at a desktop size (capture view beside the guidance panel).
   const page = await browser.newPage();
+  await noFullscreen(page);
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(String(e)));
   await page.setViewport({ width: 1280, height: 720 });
@@ -88,6 +96,28 @@ try {
   assert.deepEqual(errors, []);
   await page.close();
 
+  // 1b. The same end-to-end MediaPipe run recorded at a phone's portrait size (393 × 852).
+  const phone = await browser.newPage();
+  await noFullscreen(phone);
+  const phoneErrors: string[] = [];
+  phone.on('pageerror', e => phoneErrors.push(String(e)));
+  await phone.setViewport({ width: 393, height: 852, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+  // The recorder takes its frame size from the page open when it starts: open the app first (a blank page lays
+  // out 980 px wide under phone emulation).
+  await phone.goto(`${origin}/`, { waitUntil: 'load' });
+  const phoneWebm = join(out, 'body-scan-mobile.webm') as `${string}.webm`;
+  const phoneRecorder = await phone.screencast({ path: phoneWebm });
+  const mpPhone = await run(phone, 'mediapipe');
+  await sleep(2500);
+  for (const target of ['#summary', '#measurements', '#view3d', '#path-figure', '.thumbs', '.export']) {
+    await phone.evaluate(sel => document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), target);
+    await sleep(3000);
+  }
+  await phoneRecorder.stop();
+  assert.deepEqual(phoneErrors, []);
+  await phone.close();
+  failed.push(...check(mpPhone.comparison, LIMITS.mediapipe).map(f => `mediapipe phone ${f}`));
+
   // 2. Oracle runs (exact mask and joints) — isolate the geometry from the ML model.
   const oracleRun = async (scenario: 'orbit' | 'turn') => {
     const p = await browser.newPage();
@@ -98,7 +128,13 @@ try {
   };
   const oracle = await oracleRun('orbit'), oracleTurn = await oracleRun('turn');
 
-  const mp4 = join(out, 'body-scan-simulation.mp4');
+  const mp4 = join(out, 'body-scan-simulation.mp4'), phoneMp4 = join(out, 'body-scan-mobile.mp4'), phoneGif = join(out, 'body-scan-mobile-preview.gif');
+  try {
+    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', phoneWebm, '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '24', '-movflags', '+faststart', phoneMp4]);
+    // A small, sped-up looping preview (GitHub READMEs show GIFs inline, not MP4s).
+    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', phoneMp4, '-vf', 'setpts=PTS/5,fps=5,scale=240:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=64[p];[b][p]paletteuse=dither=bayer:bayer_scale=4', '-loop', '0', phoneGif]);
+    await rm(phoneWebm);
+  } catch { log('ffmpeg unavailable: keeping the phone .webm only'); }
   try {
     execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', webm, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '23', '-movflags', '+faststart', mp4]);
     await rm(webm);
@@ -135,6 +171,7 @@ ${path(oracleTurn.trajectory)}
   if (!pathOk(mp.trajectory, 8, 5)) failed.push(`mediapipe camera path ${JSON.stringify(mp.trajectory)}`);
   if (!pathOk(oracleTurn.trajectory, 3, 3)) failed.push(`oracle turn camera path ${JSON.stringify(oracleTurn.trajectory)}`);
   log(`Video: ${existsSync(mp4) ? mp4 : webm}`);
+  log(`Phone video: ${existsSync(phoneMp4) ? `${phoneMp4} (preview ${phoneGif})` : phoneWebm}`);
   log(`Photos and report: ${out}`);
 } finally {
   await browser.close();

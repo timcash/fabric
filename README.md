@@ -11,6 +11,11 @@
 
 Installed, it opens full screen in portrait and works offline. The pose model is cached after the first scan.
 
+<p align="center">
+  <a href="https://timcash.github.io/fabric/media/body-scan-mobile.mp4"><img src="docs/media/body-scan-mobile-preview.gif" width="240" alt="End-to-end test on a phone-size screen: setup, front capture with arms out, a helper walking around the subject in a room, and the results scored against the 3D body" /></a>
+</p>
+<p align="center"><sub><b>End-to-end test on a phone screen (393 × 852), 5× speed.</b> A simulated helper walks around a CC0 3D body in a furnished room; real MediaPipe runs on every rendered frame.<br /><a href="https://timcash.github.io/fabric/media/body-scan-mobile.mp4">Full phone video (106 s)</a> · <a href="https://timcash.github.io/fabric/media/body-scan-simulation.mp4">Desktop layout</a> · recorded by <code>npm run test:sim</code></sub></p>
+
 Fabric started from [timcash/template](https://github.com/timcash/template) (Vite + TypeScript + Three.js, copied at `be59c4f`). The scanner is the home page ([index.html](index.html)); the template's slide deck lives at [deck.html](deck.html).
 
 ```sh
@@ -78,6 +83,7 @@ The walk-around mode borrows its central idea: **re-anchor metric scale in every
 - `npm test` includes [test/sim-makehuman.test.ts](test/sim-makehuman.test.ts). It uses exact masks and joints from a software rasterizer across five setups: camera at 70, 100 and 130 cm; 2.5–3 m; 66–72° field of view; and body shapes ×0.85 to ×1.25 in girth.
 - `npm test` also covers the walk-around with exact masks and joints ([src/sim/path.ts](src/sim/path.ts)). The handheld phone's distance (±2 cm), height (±6 cm with walking bob), aim (±3°), pitch (−3 ± 3°) and roll (±3°) wander, and the gravity reading has 0.4° of noise.
 - `npm run test:sim` renders the scene with three.js in Chrome: the subject stands in a **furnished room** ([src/sim/room.ts](src/sim/room.ts)) while **a helper, a second MakeHuman body holding the phone, walks around them**. It runs **the real MediaPipe model on every rendered frame** through the actual app UI. It writes to `test-results/body-scan-sim/`:
+  - `body-scan-mobile.mp4` and `body-scan-mobile-preview.gif`: the same end-to-end run at a phone's portrait size (393 × 852). `npm run media:readme` copies them, and the desktop video, into the README and the site.
   - `body-scan-simulation.mp4`: setup → front capture → walk-around (with a cut-away view of the room, helper and phone) → results, with mesh truth, the true mesh under the measured rings, and the estimated vs true camera path.
   - `photos/`: rendered photos from the helper's walk every 45°.
   - `report.md` and `report.json`: measured vs mesh truth and camera-path error. These cover MediaPipe on the walk-around, and the oracle on both the walk-around and the turn-on-the-spot scenarios.

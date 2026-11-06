@@ -19,7 +19,8 @@
     "predev": "node --experimental-strip-types scripts/prepare-pose-assets.ts",
     "prebuild": "node --experimental-strip-types scripts/prepare-pose-assets.ts",
     "test:scan": "node --experimental-strip-types scripts/scan-browser-test.ts",
-    "test:sim": "node --experimental-strip-types scripts/sim-video-test.ts"
+    "test:sim": "node --experimental-strip-types scripts/sim-video-test.ts",
+    "media:readme": "mkdir -p public/media docs/media && cp test-results/body-scan-sim/body-scan-mobile.mp4 test-results/body-scan-sim/body-scan-simulation.mp4 public/media/ && cp test-results/body-scan-sim/body-scan-mobile-preview.gif docs/media/"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.1.1",
