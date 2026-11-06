@@ -14,11 +14,12 @@
     "test:browser": "node --experimental-strip-types scripts/browser-test.ts",
     "test:dag": "node --experimental-strip-types scripts/dag-browser-test.ts",
     "test:walkthrough": "node --experimental-strip-types scripts/walkthrough-browser-test.ts",
-    "check": "npm test && npm run build && npm run test:browser && npm run test:dag && npm run test:walkthrough && npm run test:scan",
+    "check": "npm test && npm run build && npm run test:browser && npm run test:dag && npm run test:walkthrough && npm run test:scan && npm run test:sim",
     "deploy": "npm run build && wrangler deploy",
     "predev": "node --experimental-strip-types scripts/prepare-pose-assets.ts",
     "prebuild": "node --experimental-strip-types scripts/prepare-pose-assets.ts",
-    "test:scan": "node --experimental-strip-types scripts/scan-browser-test.ts"
+    "test:scan": "node --experimental-strip-types scripts/scan-browser-test.ts",
+    "test:sim": "node --experimental-strip-types scripts/sim-video-test.ts"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.1.1",

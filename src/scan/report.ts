@@ -1,6 +1,6 @@
 import { ellipsePerimeter } from './geometry.ts';
 import { ARM_SITES, LEG_SITES, TORSO_SITES, type FrontAnalysis, type LengthId, type SideAnalysis, type Site } from './measure.ts';
-import { binnedWidths, coverage, girthFromWidths, TURN_SITES, type TurnSample, type TurnSite } from './turntable.ts';
+import { binnedWidths, coverage, girthFromWidths, legProfileDepth, TORSO_TURN_SITES, type TurnSample, type TurnSite } from './turntable.ts';
 
 export type Method = 'turntable' | 'two-view' | 'front-estimate' | 'circular' | 'silhouette' | 'landmark' | 'input';
 
@@ -27,7 +27,7 @@ export type Report = {
 export const LABELS: Record<Measurement['id'], string> = {
   height: 'Height', neck: 'Neck', chest: 'Chest / bust', waist: 'Waist (narrowest)', hip: 'Hip / seat (fullest)',
   thigh: 'Upper thigh', knee: 'Knee', calf: 'Calf', ankle: 'Ankle', bicep: 'Upper arm', forearm: 'Forearm', wrist: 'Wrist',
-  shoulderBreadth: 'Shoulder breadth', armLength: 'Arm length (shoulder–wrist)', inseam: 'Inseam (crotch–floor)', legLength: 'Hip-joint height',
+  shoulderBreadth: 'Shoulder span (joint centres)', armSpan: 'Arm span (fingertips)', armLength: 'Arm length (shoulder–wrist)', inseam: 'Inseam (crotch–floor)', legLength: 'Hip-joint height',
   torsoLength: 'Shoulder–hip (torso)', shoulderToCrotch: 'Shoulder–crotch', waistHeight: 'Waist height',
 };
 
@@ -43,6 +43,7 @@ export const METHOD_TEXT: Record<Method, string> = {
 
 /** Typical depth/width ratios used only when no profile view exists. */
 const TYPICAL_RATIO: Record<string, number> = { neck: 1.0, chest: 0.72, waist: 0.74, hip: 0.68 };
+const WRIST_RATIO = 1.35;
 const ERROR_PCT: Record<Method, number> = { turntable: 0.025, 'two-view': 0.04, 'front-estimate': 0.1, circular: 0.07, silhouette: 0.01, landmark: 0.015, input: 0 };
 
 export function buildReport(front: FrontAnalysis, side: SideAnalysis | null, turn: readonly TurnSample[] = []): Report {
@@ -55,7 +56,7 @@ export function buildReport(front: FrontAnalysis, side: SideAnalysis | null, tur
     const f = front.sites[site];
     if (!f) continue;
     const W = f.widthCm, D = side?.sites[site]?.widthCm;
-    const samples = (TURN_SITES as readonly string[]).includes(site) ? binnedWidths(turn, site as TurnSite) : [];
+    const samples = (TORSO_TURN_SITES as readonly string[]).includes(site) ? binnedWidths(turn, site as TurnSite) : [];
     const usable = samples.length >= 4 ? girthFromWidths(W, D, samples) : null;
     if (usable) add({ id: site, group: 'girth', cm: usable.girthCm, method: 'turntable', levelCm: f.heightCm, widthCm: W, depthCm: usable.depthCm });
     else if (D) add({ id: site, group: 'girth', cm: ellipsePerimeter(W / 2, D / 2), method: 'two-view', levelCm: f.heightCm, widthCm: W, depthCm: D });
@@ -65,15 +66,21 @@ export function buildReport(front: FrontAnalysis, side: SideAnalysis | null, tur
     const f = front.sites[site];
     if (!f) continue;
     const D = side?.sites[site]?.widthCm;
-    if (D) add({ id: site, group: 'girth', cm: ellipsePerimeter(f.widthCm / 2, D / 2), method: 'two-view', levelCm: f.heightCm, widthCm: f.widthCm, depthCm: D });
+    const samples = binnedWidths(turn, site);
+    const turned = samples.length >= 3 ? girthFromWidths(f.widthCm, legProfileDepth(turn, site, f.widthCm) ?? D, samples) : null;
+    if (turned) add({ id: site, group: 'girth', cm: turned.girthCm, method: 'turntable', levelCm: f.heightCm, widthCm: f.widthCm, depthCm: turned.depthCm });
+    else if (D) add({ id: site, group: 'girth', cm: ellipsePerimeter(f.widthCm / 2, D / 2), method: 'two-view', levelCm: f.heightCm, widthCm: f.widthCm, depthCm: D });
     else add({ id: site, group: 'girth', cm: Math.PI * f.widthCm, method: 'circular', levelCm: f.heightCm, widthCm: f.widthCm });
   }
   for (const site of ARM_SITES) {
     const f = front.sites[site];
-    if (f) add({ id: site, group: 'girth', cm: Math.PI * f.widthCm, method: 'circular', levelCm: f.heightCm, widthCm: f.widthCm });
+    if (!f) continue;
+    // With arms out and palms down the camera sees the wrist's thickness; wrists are about 1.35× wider than thick.
+    if (site === 'wrist') add({ id: site, group: 'girth', cm: ellipsePerimeter(f.widthCm / 2, (f.widthCm * WRIST_RATIO) / 2), method: 'front-estimate', levelCm: f.heightCm, widthCm: f.widthCm });
+    else add({ id: site, group: 'girth', cm: Math.PI * f.widthCm, method: 'circular', levelCm: f.heightCm, widthCm: f.widthCm });
   }
   const lengthMethod: Record<LengthId, Method> = {
-    shoulderBreadth: 'silhouette', armLength: 'landmark', inseam: 'silhouette', legLength: 'landmark', torsoLength: 'landmark', shoulderToCrotch: 'silhouette', waistHeight: 'silhouette',
+    shoulderBreadth: 'landmark', armSpan: 'silhouette', armLength: 'landmark', inseam: 'silhouette', legLength: 'landmark', torsoLength: 'landmark', shoulderToCrotch: 'silhouette', waistHeight: 'silhouette',
   };
   for (const id of Object.keys(lengthMethod) as LengthId[]) {
     const v = front.lengths[id];
@@ -82,7 +89,8 @@ export function buildReport(front: FrontAnalysis, side: SideAnalysis | null, tur
   const bins = coverage(turn);
   return {
     measurements: out,
-    warnings: [...front.warnings, ...(side?.warnings ?? [])],
+    // Profile-view complaints about a site the turn measured are moot.
+    warnings: [...front.warnings, ...(side?.warnings ?? []).filter(w => !out.some(m => m.method === 'turntable' && w.includes(`Profile ${m.id} `)))],
     turnCoverage: bins.filter(Boolean).length / bins.length,
     createdAt: new Date().toISOString(),
   };

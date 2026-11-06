@@ -4,9 +4,10 @@ import { analyzeFront, analyzeSide, armsRaised, combineAnalyses, hipScale, type 
 import { allOk, evaluate, Stillness, type Check } from './quality.ts';
 import { buildReport, CM_PER_INCH, formatLength, LABELS, METHOD_TEXT, toCsv, type Report, type Units } from './report.ts';
 import { analyzeTurnFrame, coverage, yawOf, BIN_COUNT, type TurnSample } from './turntable.ts';
-import { CameraFeed, DemoFeed, paintMask, Tilt, type Feed, type Frame, type Step } from './feeds.ts';
+import { CameraFeed, paintMask, Tilt, type Feed, type Frame, type Step } from './feeds.ts';
 import { drawAnalysis, drawGuide, drawLive, renderChecks } from './overlay.ts';
-import { armAngle, defaultBody, truth } from './synthetic.ts';
+import type { SimFeed } from '../sim/sim-feed.ts';
+import type { Comparison } from '../sim/compare.ts';
 import type { PoseSource } from './pose-mediapipe.ts';
 import type { PackagedFrame } from './capture-package.ts';
 import type { Observation } from './types.ts';
@@ -21,7 +22,7 @@ let feed: Feed | null = null;
 let abort: AbortController | null = null;
 let manual = false;
 let disposeView: (() => void) | null = null;
-let current: { report: Report; front: FrontAnalysis; frontObs: Observation; frontImage: HTMLCanvasElement; side: SideAnalysis | null; sideObs: Observation | null; sideImage: HTMLCanvasElement | null; frames: PackagedFrame[]; demo: boolean } | null = null;
+let current: { report: Report; front: FrontAnalysis; frontObs: Observation; frontImage: HTMLCanvasElement; side: SideAnalysis | null; sideObs: Observation | null; sideImage: HTMLCanvasElement | null; frames: PackagedFrame[]; sim: SimFeed | null; comparison: Comparison[] | null } | null = null;
 
 try { const u = localStorage.getItem('fabric-body-scan:units'); if (u === 'in' || u === 'cm') units = u; } catch { /* storage unavailable */ }
 
@@ -160,7 +161,7 @@ async function captureTurn(front: FrontAnalysis, signal: AbortSignal): Promise<T
   const samples: TurnSample[] = [], profiles: Turn['profiles'] = [], frames: PackagedFrame[] = [];
   let profileImage: HTMLCanvasElement | null = null;
   const started = performance.now();
-  let lastFrameKept = 0, armsUpAt: number | null = null;
+  let lastFrameKept = 0, armsOutAt: number | null = null;
   manual = false;
   $('turn-dial').hidden = false;
   drawDial(coverage([]));
@@ -169,11 +170,12 @@ async function captureTurn(front: FrontAnalysis, signal: AbortSignal): Promise<T
     const frame = await feed!.frame('turn', elapsed);
     if (!frame) continue;
     const checks = evaluate(frame.obs, 'turn', { tiltDeg: feed!.tilt() });
-    const up = checks.find(c => c.id === 'armsUp')?.ok ?? false;
-    if (up) armsUpAt ??= performance.now();
+    // Arms out is required: frames with the arms down are shown but never measured.
+    const up = checks.find(c => c.id === 'arms')?.ok ?? false;
+    if (up) armsOutAt ??= performance.now();
     paint(frame, checks, up);
     const o = frame.obs;
-    if (o && armsUpAt !== null && checks.find(c => c.id === 'frame')?.ok) {
+    if (o && up && armsOutAt !== null && checks.find(c => c.id === 'frame')?.ok) {
       const s = analyzeTurnFrame(o, front);
       if (s) {
         samples.push(s);
@@ -190,10 +192,10 @@ async function captureTurn(front: FrontAnalysis, signal: AbortSignal): Promise<T
     }
     const bins = coverage(samples);
     drawDial(bins);
-    const turning = armsUpAt !== null ? performance.now() - armsUpAt : 0;
-    $('capture-status').textContent = armsUpAt === null ? 'Raise both arms overhead in a V to start.' : `Turning… ${samples.length} views`;
-    const done = bins.every(Boolean) && samples.length >= 40 && turning > 6000;
-    if (done || manual || turning > 25000 || (armsUpAt === null && elapsed > 15000)) {
+    const turning = armsOutAt !== null ? performance.now() - armsOutAt : 0;
+    $('capture-status').textContent = armsOutAt === null || !up ? 'Hold both arms straight out to the sides.' : `Turning… ${samples.length} views`;
+    const done = feed!.turnDone ? feed!.turnDone() : bins.every(Boolean) && samples.length >= 40 && turning > 6000;
+    if (done || manual || (!feed!.turnDone && turning > 25000) || (armsOutAt === null && elapsed > 15000)) {
       beep(1320, 180);
       $('turn-dial').hidden = true;
       return { samples, profiles, profileImage, frames };
@@ -202,46 +204,58 @@ async function captureTurn(front: FrontAnalysis, signal: AbortSignal): Promise<T
   throw new DOMException('cancelled', 'AbortError');
 }
 
-async function runCameraFlow(kind: 'camera' | 'demo') {
-  const h = kind === 'demo' ? defaultBody.heightCm : heightCm();
-  if (!h) { setupError('Enter a height between 100 and 230 cm (39–90 in).'); $('height').focus(); return; }
+async function runCameraFlow(kind: 'camera' | 'sim') {
+  let h = kind === 'sim' ? 0 : heightCm();
+  if (kind === 'camera' && !h) { setupError('Enter a height between 100 and 230 cm (39–90 in).'); $('height').focus(); return; }
   setupError('');
   const withTurn = $<HTMLInputElement>('turn').checked;
   abort = new AbortController();
   const { signal } = abort;
   show('capture');
   try {
-    if (kind === 'demo') feed = new DemoFeed(Number(params.get('demoTurnMs')) || 7000);
-    else {
+    let sim: SimFeed | null = null;
+    if (kind === 'sim') {
+      const detector = params.get('detector') === 'oracle' ? 'oracle' : 'mediapipe';
+      $('capture-status').textContent = 'Loading the simulated body…';
+      const { SimFeed } = await import('../sim/sim-feed.ts');
+      sim = await SimFeed.create({ detector, pose: detector === 'mediapipe' ? await loadPose() : undefined, turnStepDeg: Number(params.get('turnStep')) || 4, girthScale: Number(params.get('girth')) || 1 });
+      feed = sim;
+      (window as unknown as { __sim: SimFeed }).__sim = sim;
+      h = sim.heightCm;
+      showInset(sim.inset, detector);
+    } else {
       await Tilt.request();
       const facing = (document.querySelector('input[name="facing"]:checked') as HTMLInputElement).value as 'environment' | 'user';
       const p = await loadPose();
       feed = await CameraFeed.open($<HTMLVideoElement>('video'), p, facing);
     }
     const total = 2;
-    stepHeader(1, total, 'Front', 'Face the camera. Hold your arms 30 to 45 degrees out from your sides, feet hip-width apart.');
+    stepHeader(1, total, 'Front', 'Face the camera. Hold both arms straight out to the sides at shoulder height, palms down, feet hip-width apart.');
     const f = await captureStill('front', signal);
-    const front = combineAnalyses(f.obs.map(o => analyzeFront(o, { kind: 'height', heightCm: h })).filter((a): a is FrontAnalysis => !!a));
+    const front = combineAnalyses(f.obs.map(o => analyzeFront(o, { kind: 'height', heightCm: h! })).filter((a): a is FrontAnalysis => !!a));
     if (!front) throw new Error('Could not find a full body outline in the front frames. Check lighting and framing, then try again.');
     requireTorso(front);
     let side: SideAnalysis | null = null, sideObs: Observation | null = null, sideImage: HTMLCanvasElement | null = null;
     let samples: TurnSample[] = [], frames: PackagedFrame[] = [];
     if (withTurn) {
-      stepHeader(2, total, 'Turn', 'Raise both arms overhead in a V, then turn slowly on the spot. One full circle, about ten seconds.');
+      stepHeader(2, total, 'Turn', 'Keep your arms straight out and turn slowly on the spot. One full circle, about ten seconds.');
       const t = await captureTurn(front, signal);
       samples = t.samples; frames = t.frames;
-      side = combineAnalyses(t.profiles.map(p => analyzeSide(p.o, front, { kind: 'fixed', cmPerPx: front.scale.cmPerPx }, p.theta)).filter((a): a is SideAnalysis => !!a));
+      side = combineAnalyses(t.profiles.map(p => analyzeSide(p.o, front, { kind: 'fixed', cmPerPx: front.scale.cmPerPx, floorY: front.scale.floorY }, p.theta)).filter((a): a is SideAnalysis => !!a));
       sideObs = t.profiles[0]?.o ?? null; sideImage = t.profileImage;
     } else {
-      stepHeader(2, total, 'Profile', 'Turn ninety degrees to your left. Raise both arms overhead in a V.');
+      stepHeader(2, total, 'Profile', 'Keep your arms straight out and turn ninety degrees to your left.');
       const s = await captureStill('profile', signal, front.ref.shoulderSpanPx);
-      side = combineAnalyses(s.obs.map(o => analyzeSide(o, front, { kind: 'fixed', cmPerPx: front.scale.cmPerPx }, yawOf(o, front))).filter((a): a is SideAnalysis => !!a));
+      side = combineAnalyses(s.obs.map(o => analyzeSide(o, front, { kind: 'fixed', cmPerPx: front.scale.cmPerPx, floorY: front.scale.floorY }, yawOf(o, front))).filter((a): a is SideAnalysis => !!a));
       sideObs = s.obs[0]; sideImage = s.image;
     }
     feed.stop();
     const report = buildReport(front, side, samples);
     say('Scan complete.');
-    current = { report, front, frontObs: f.obs[0], frontImage: f.image, side, sideObs, sideImage, frames, demo: kind === 'demo' };
+    let comparison: Comparison[] | null = null;
+    if (sim) { const { compareToMesh } = await import('../sim/compare.ts'); const t = sim.truth(); comparison = compareToMesh(report, front, t.body, t.cam); }
+    current = { report, front, frontObs: f.obs[0], frontImage: f.image, side, sideObs, sideImage, frames, sim, comparison };
+    (window as unknown as { __scan: unknown }).__scan = { report, comparison };
   } catch (error) {
     feed?.stop();
     if ((error as Error).name === 'AbortError') { show('setup'); return; }
@@ -290,7 +304,7 @@ async function measurePhotos() {
         side = source ? analyzeSide(sideObs, front, source, yawOf(sideObs, front)) : null;
       }
     }
-    current = { report: buildReport(front, side), front, frontObs, frontImage, side, sideObs, sideImage, frames: [], demo: false };
+    current = { report: buildReport(front, side), front, frontObs, frontImage, side, sideObs, sideImage, frames: [], sim: null, comparison: null };
   } catch (error) {
     setupError((error as Error).message);
     return;
@@ -307,18 +321,20 @@ function finish() {
   renderResults();
 }
 
-function demoTruth(id: string, level?: number): number | undefined {
-  if (level === undefined) return undefined;
-  if (['neck', 'chest', 'waist', 'hip'].includes(id)) return truth.torso(defaultBody, level);
-  if (['thigh', 'knee', 'calf', 'ankle'].includes(id)) return truth.leg(defaultBody, level);
-  if (['bicep', 'forearm', 'wrist'].includes(id)) return truth.arm(defaultBody, (defaultBody.shoulder.y - level) / Math.cos(armAngle('a-pose')));
-  return undefined;
+function showInset(inset: HTMLCanvasElement, detector: string) {
+  inset.className = 'sim-inset';
+  inset.setAttribute('aria-label', 'Simulation: the phone and the turning body seen from outside');
+  const badge = document.createElement('p');
+  badge.className = 'sim-badge';
+  badge.textContent = `Simulation · CC0 MakeHuman mesh · ${detector === 'oracle' ? 'exact mask and joints' : 'MediaPipe on rendered frames'}`;
+  $('stage').append(inset, badge);
 }
 
 function renderResults() {
   if (!current) return;
-  const { report, front, demo } = current;
-  $('results-source').textContent = demo ? 'Demo · synthetic body with known girths' : `Scanned ${new Date(report.createdAt).toLocaleString()}`;
+  const { report, front, comparison } = current;
+  const demo = !!comparison;
+  $('results-source').textContent = demo ? 'Simulation · scored against the posed 3D mesh' : `Scanned ${new Date(report.createdAt).toLocaleString()}`;
   const fmt = (cm: number) => formatLength(cm, units);
   $('summary').replaceChildren(...['chest', 'waist', 'hip'].map(id => {
     const m = report.measurements.find(x => x.id === id);
@@ -332,13 +348,14 @@ function renderResults() {
   }));
   const head = $('measurements').querySelector('thead tr')!;
   head.querySelector('[data-truth]')?.remove();
-  if (demo) { const th = document.createElement('th'); th.scope = 'col'; th.dataset.truth = ''; th.textContent = 'True'; head.append(th); }
+  head.querySelector('[data-error]')?.remove();
+  if (demo) for (const [key, text] of [['truth', 'Mesh'], ['error', 'Error']]) { const th = document.createElement('th'); th.scope = 'col'; th.dataset[key] = ''; th.textContent = text; head.append(th); }
   const tbody = $('measurements').querySelector('tbody')!;
   tbody.replaceChildren(...report.measurements.map(m => {
     const tr = document.createElement('tr');
     tr.dataset.id = m.id; tr.dataset.group = m.group;
     const cells = [m.label, fmt(m.cm), m.errorCm ? fmt(m.errorCm) : '—', m.method];
-    if (demo) { const t = demoTruth(m.id, m.levelCm); cells.push(t ? fmt(t) : m.id === 'height' ? fmt(defaultBody.heightCm) : '—'); }
+    if (demo) { const c = comparison!.find(x => x.id === m.id); cells.push(c ? fmt(c.truthCm) : '—', c ? `${c.errorPct >= 0 ? '+' : ''}${c.errorPct.toFixed(1)}%` : '—'); }
     cells.forEach((text, i) => { const td = document.createElement(i ? 'td' : 'th'); if (!i) td.setAttribute('scope', 'row'); td.textContent = text; if (i === 3) td.title = METHOD_TEXT[m.method]; tr.append(td); });
     return tr;
   }));
@@ -350,7 +367,7 @@ function renderResults() {
   $('download-package').hidden = !current.frames.length;
   disposeView?.();
   disposeView = null;
-  import('./view3d.ts').then(({ showBody }) => { if (current) disposeView = showBody($('view3d'), current.report, current.front); });
+  import('./view3d.ts').then(({ showBody }) => { if (current) disposeView = showBody($('view3d'), current.report, current.front, current.sim?.ghost()); });
   document.body.dataset.measured = String(report.measurements.length);
 }
 
@@ -372,7 +389,7 @@ $('download-package').addEventListener('click', async () => {
 $('new-scan').addEventListener('click', () => { disposeView?.(); disposeView = null; current = null; show('setup'); });
 
 $('setup-form').addEventListener('submit', event => { event.preventDefault(); void runCameraFlow('camera'); });
-$('start-demo').addEventListener('click', () => void runCameraFlow('demo'));
+$('start-demo').addEventListener('click', () => void runCameraFlow('sim'));
 $('measure-photos').addEventListener('click', () => void measurePhotos());
 $('capture-now').addEventListener('click', () => { manual = true; });
 $('cancel-scan').addEventListener('click', () => abort?.abort());
@@ -383,4 +400,4 @@ $('height-unit').addEventListener('change', () => {
   input.min = toIn ? '39' : '100'; input.max = toIn ? '91' : '230';
   if (Number.isFinite(v)) input.value = (toIn ? v / CM_PER_INCH : v * CM_PER_INCH).toFixed(1);
 });
-if (params.get('demo') === '1') void runCameraFlow('demo');
+if (params.get('demo') === '1' || params.get('sim') === '1') void runCameraFlow('sim');

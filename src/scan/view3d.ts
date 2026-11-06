@@ -34,7 +34,8 @@ function loft(rings: Ring[], material: THREE.Material): THREE.Mesh {
   return new THREE.Mesh(g, material);
 }
 
-export function showBody(container: HTMLElement, report: Report, front: FrontAnalysis): () => void {
+/** `ghost`: the true body surface (cm, centred, floor at y = 0), drawn translucent under the measured rings. */
+export function showBody(container: HTMLElement, report: Report, front: FrontAnalysis, ghost?: { positions: Float32Array; triangles: Uint32Array }): () => void {
   const W = container.clientWidth || 320, H = container.clientHeight || 420;
   let renderer: THREE.WebGLRenderer;
   try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); } catch { container.textContent = '3D preview unavailable on this device.'; return () => {}; }
@@ -48,6 +49,8 @@ export function showBody(container: HTMLElement, report: Report, front: FrontAna
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(0, heightM * 0.5, 0);
   controls.enableDamping = true;
+  controls.autoRotate = !!ghost;
+  controls.autoRotateSpeed = 1.6;
   scene.add(new THREE.HemisphereLight(0xdde8ff, 0x101820, 2.2));
   const grid = new THREE.GridHelper(2, 20, 0x3a4a60, 0x1c2633);
   scene.add(grid);
@@ -84,7 +87,15 @@ export function showBody(container: HTMLElement, report: Report, front: FrontAna
     const g = new THREE.BufferGeometry().setFromPoints(ringPoints(r));
     scene.add(new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color: r.color })));
   }
+  if (ghost) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(ghost.positions.map(v => v / 100), 3));
+    g.setIndex(new THREE.BufferAttribute(ghost.triangles, 1));
+    g.computeVertexNormals();
+    scene.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xd8c4b0, transparent: true, opacity: 0.35, roughness: 0.7, depthWrite: false })));
+  }
   const head = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), surface);
+  head.visible = !ghost;
   head.scale.set(0.08, 0.11, 0.1);
   head.position.set(0, heightM - 0.11, 0);
   scene.add(head);

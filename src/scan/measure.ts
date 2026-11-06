@@ -17,7 +17,7 @@ export const ARM_SITES: readonly ArmSite[] = ['bicep', 'forearm', 'wrist'];
 /** A measured chord (or a left/right pair) at one body site. */
 export type SiteChord = { chords: Chord[]; widthCm: number; heightCm: number };
 
-export type LengthId = 'shoulderBreadth' | 'armLength' | 'inseam' | 'legLength' | 'torsoLength' | 'shoulderToCrotch' | 'waistHeight';
+export type LengthId = 'shoulderBreadth' | 'armSpan' | 'armLength' | 'inseam' | 'legLength' | 'torsoLength' | 'shoulderToCrotch' | 'waistHeight';
 export type LengthValue = { cm: number; segments: [Point, Point][] };
 
 export type Scale = { cmPerPx: number; floorY: number; topY: number };
@@ -29,7 +29,7 @@ export type FrontAnalysis = {
   sites: Partial<Record<Site, SiteChord>>;
   lengths: Partial<Record<LengthId, LengthValue>>;
   /** Frontal reference spans (px) and the hip-joint height used to follow the subject in later frames. */
-  ref: { shoulderSpanPx: number; hipSpanPx: number; hipHeightCm: number };
+  ref: { shoulderSpanPx: number; hipSpanPx: number; hipHeightCm: number; hipYPx: number; bodyPx: number; legJointsCm: { hip: number; knee: number; ankle: number } };
   warnings: string[];
 };
 
@@ -44,7 +44,26 @@ const P = (o: Observation, i: number) => px(o.landmarks[i], o.width, o.height);
 const toCm = (s: Scale, y: number) => (s.floorY - y) * s.cmPerPx;
 const toY = (s: Scale, h: number) => s.floorY - h / s.cmPerPx;
 
-export type ScaleSource = { kind: 'height'; heightCm: number } | { kind: 'fixed'; cmPerPx: number };
+/** 'phone': pinhole camera, upright, with a typical main-camera field of view. 'orthographic': no perspective. */
+export type Lens = 'phone' | 'orthographic';
+export type ScaleSource = { kind: 'height'; heightCm: number; lens?: Lens } | { kind: 'fixed'; cmPerPx: number; floorY?: number };
+
+/** Typical phone main-camera field of view along the image's long side (≈26 mm equivalent). */
+export const PHONE_FOV_DEG = 68;
+/** The back of the heel sits about this fraction of stature behind the body's plane. */
+const HEEL_BEHIND = 0.03;
+
+/**
+ * Image row of the floor under the body. Feet pointing at the camera reach lower in the image than the heels
+ * (perspective), so the silhouette bottom overstates the body's pixel height by several percent. The heels sit
+ * close to the body's plane, so heel landmarks are preferred; the silhouette bottom is the fallback.
+ */
+export function floorRow(o: Observation, silhouetteBottom: number): number | null {
+  const heels = [LM.leftHeel, LM.rightHeel].map(i => o.landmarks[i]).filter(l => (l.visibility ?? 1) >= 0.5).map(l => l.y * o.height);
+  const ankle = Math.min(P(o, LM.leftAnkle).y, P(o, LM.rightAnkle).y);
+  const ok = heels.filter(y => y > ankle && y <= silhouetteBottom + 2);
+  return ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : null;
+}
 
 /** Finds the subject's silhouette (connected to the hip midpoint) and converts pixels to centimetres. */
 export function measureScale(o: Observation, source: ScaleSource): Scale | null {
@@ -53,8 +72,18 @@ export function measureScale(o: Observation, source: ScaleSource): Scale | null 
   const seed = along(hip, sh, 0.3);
   const ext = verticalExtent(o.mask, seed) ?? verticalExtent(o.mask, hip);
   if (!ext || ext.bottom - ext.top < o.height * 0.2) return null;
-  const cmPerPx = source.kind === 'height' ? source.heightCm / (ext.bottom - ext.top) : source.cmPerPx;
-  return { cmPerPx, floorY: ext.bottom, topY: ext.top };
+  if (source.kind === 'fixed' && source.floorY !== undefined) return { cmPerPx: source.cmPerPx, floorY: source.floorY, topY: ext.top };
+  const heel = floorRow(o, ext.bottom);
+  let floorY = heel ?? ext.bottom;
+  const scaleFor = (f: number) => (source.kind === 'height' ? source.heightCm / (f - ext.top) : source.cmPerPx);
+  if (heel !== null && (source.kind === 'fixed' || source.lens !== 'orthographic')) {
+    // Heels sit behind the body's plane, so with the camera above the floor they image slightly higher than the
+    // floor under the body. Shift by that parallax (upright pinhole camera, typical field of view).
+    const s = scaleFor(floorY), f = Math.max(o.width, o.height) / 2 / Math.tan((PHONE_FOV_DEG * Math.PI) / 360);
+    const D = f * s, camHeight = (floorY - o.height / 2) * s, behind = HEEL_BEHIND * (floorY - ext.top) * s;
+    if (camHeight > 0) floorY += (f * camHeight * behind) / (D * (D + behind));
+  }
+  return { cmPerPx: scaleFor(floorY), floorY, topY: ext.top };
 }
 
 /** Horizontal silhouette width (px) at row y of the run nearest x. */
@@ -106,7 +135,10 @@ export function analyzeFront(o: Observation, source: ScaleSource): FrontAnalysis
   const sites: FrontAnalysis['sites'] = {};
 
   const neckSpan = sh.y - mouth.y;
-  sites.neck = site(scale, [scanRows(mouth.y + 0.35 * neckSpan, sh.y - 0.15 * neckSpan, 'min', torsoAt)]);
+  // Mid-neck, below the larynx: 40% of the way up from the shoulder line to the mouth. The narrowest row is
+  // right under the jaw, where a tape would catch the chin.
+  const neckY = sh.y - 0.4 * neckSpan;
+  sites.neck = site(scale, [scanRows(neckY - 0.05 * neckSpan, neckY + 0.05 * neckSpan, 'median', torsoAt)]);
   const chestY = sh.y + 0.27 * T;
   sites.chest = site(scale, [scanRows(chestY - 0.02 * T, chestY + 0.02 * T, 'median', torsoAt)]);
   sites.waist = site(scale, [scanRows(sh.y + 0.55 * T, sh.y + 0.85 * T, 'min', torsoAt)]);
@@ -118,11 +150,13 @@ export function analyzeFront(o: Observation, source: ScaleSource): FrontAnalysis
     crotchY = null;
     warnings.push('The crotch could not be located reliably (skirt, hands or objects near the hips?). Inseam and thigh are unavailable.');
   } else if (crotchY === null) warnings.push('No gap between the legs was found: stand with feet hip-width apart. Inseam and thigh are unavailable.');
-  const hipBottom = Math.min(hp.y + 0.35 * T, (crotchY ?? Infinity) - 2);
+  // The fullest hip sits near the hip joints. Below that, a camera above waist height sees the fronts of the
+  // thighs above the apparent crotch, which would read as "wider hips".
+  const hipBottom = Math.min(hp.y + 0.15 * T, (crotchY ?? Infinity) - 0.04 * T);
   sites.hip = site(scale, [scanRows(hp.y - 0.1 * T, hipBottom, 'max', torsoAt)]);
 
   const chestChord = sites.chest?.chords[0];
-  if (chestChord && chestChord.length > 1.35 * dist(lS, rS)) warnings.push('Arms may be touching the torso at chest level: hold them about 30–45° away from your sides.');
+  if (chestChord && chestChord.length > 1.35 * dist(lS, rS)) warnings.push('Something wider than the torso touches it at chest level (arms down, loose clothing, or another person).');
 
   // Legs: perpendicular chords on each leg; left/right averaged.
   const legs = [[LM.leftHip, LM.leftKnee, LM.leftAnkle], [LM.rightHip, LM.rightKnee, LM.rightAnkle]].map(([h, k, a]) => ({ hip: P(o, h), knee: P(o, k), ankle: P(o, a) }));
@@ -150,11 +184,14 @@ export function analyzeFront(o: Observation, source: ScaleSource): FrontAnalysis
 
   const lengths: FrontAnalysis['lengths'] = {};
   const cm = (v: number) => v * scale.cmPerPx;
-  const shoulderRow = torsoAt(sh.y);
-  if (shoulderRow) lengths.shoulderBreadth = { cm: cm(shoulderRow.length), segments: [[shoulderRow.a, shoulderRow.b]] };
+  lengths.shoulderBreadth = { cm: cm(dist(lS, rS)), segments: [[lS, rS]] };
+  // Fingertip to fingertip: march past each wrist along the forearm to the end of the silhouette.
+  const tips = arms.map(a => { const d = unit(a.e, a.w); const c = chordAlong(o.mask, a.w, d, undefined, 0.6 * T); return c ? (dot2(sub2(c.b, a.w), d) > 0 ? c.b : c.a) : null; });
+  const level = arms.every(a => Math.abs(a.w.y - a.s.y) < 0.15 * dist(a.s, a.w));
+  if (tips[0] && tips[1] && level) lengths.armSpan = { cm: cm(dist(tips[0], tips[1])), segments: [[tips[0], tips[1]]] };
   const armLens = arms.map(a => dist(a.s, a.e) + dist(a.e, a.w));
   const armCm = cm(median(armLens));
-  if (armCm > 0.25 * heightCm && armCm < 0.42 * heightCm) lengths.armLength = { cm: armCm, segments: arms.flatMap(a => [[a.s, a.e], [a.e, a.w]] as [Point, Point][]) };
+  if (armCm > 0.2 * heightCm && armCm < 0.42 * heightCm) lengths.armLength = { cm: armCm, segments: arms.flatMap(a => [[a.s, a.e], [a.e, a.w]] as [Point, Point][]) };
   else warnings.push('Arms looked bent or hidden, so arm length was not measured.');
   lengths.legLength = { cm: toCm(scale, hp.y), segments: [[hp, { x: hp.x, y: scale.floorY }]] };
   lengths.torsoLength = { cm: cm(T), segments: [[sh, { x: sh.x, y: hp.y }]] };
@@ -166,7 +203,8 @@ export function analyzeFront(o: Observation, source: ScaleSource): FrontAnalysis
 
   return {
     view: 'front', scale, heightCm, sites, lengths, warnings,
-    ref: { shoulderSpanPx: dist(lS, rS), hipSpanPx: dist(lH, rH), hipHeightCm: toCm(scale, hp.y) },
+    ref: { shoulderSpanPx: Math.abs(lS.x - rS.x), hipSpanPx: Math.abs(lH.x - rH.x), hipHeightCm: toCm(scale, hp.y), hipYPx: hp.y, bodyPx: scale.floorY - scale.topY,
+      legJointsCm: { hip: toCm(scale, hp.y), knee: toCm(scale, (P(o, LM.leftKnee).y + P(o, LM.rightKnee).y) / 2), ankle: toCm(scale, (P(o, LM.leftAnkle).y + P(o, LM.rightAnkle).y) / 2) } },
   };
 }
 
@@ -199,10 +237,10 @@ export function analyzeSide(o: Observation, front: FrontAnalysis, source: ScaleS
   const cx = (y: number) => (y <= sh.y ? sh.x : y >= hp.y ? hp.x : lerp(sh.x, hp.x, (y - sh.y) / (T || 1)));
   const sites: SideAnalysis['sites'] = {};
   const window: Record<TorsoSite, [number, Pick]> = { neck: [0.5, 'median'], chest: [3, 'max'], waist: [1, 'median'], hip: [4, 'max'] };
-  const raised = armsRaised(o);
+  const raised = armsAway(o);
   for (const name of ['neck', 'chest', 'waist', 'hip'] as const) {
     const f = front.sites[name];
-    if (!f || (name === 'neck' && raised)) continue; // raised arms flank the neck in profile
+    if (!f || (name === 'neck' && raised)) continue; // arms held out or up flank the neck in profile
     const [win, pick] = window[name];
     const c = scanRows(toY(scale, f.heightCm + win), toY(scale, f.heightCm - win), pick, y => rowChord(o, y, cx(y), 6));
     const depth = c ? c.length * scale.cmPerPx : NaN;
@@ -253,6 +291,15 @@ export function hipScale(o: Observation, front: FrontAnalysis): ScaleSource | nu
   const hipY = (P(o, LM.leftHip).y + P(o, LM.rightHip).y) / 2;
   return { kind: 'fixed', cmPerPx: front.ref.hipHeightCm / (probe.floorY - hipY) };
 }
+
+const dot2 = (a: Point, b: Point) => a.x * b.x + a.y * b.y;
+const sub2 = (a: Point, b: Point): Point => ({ x: a.x - b.x, y: a.y - b.y });
+
+/** True when the wrists are held out or up (above the hips), rather than hanging at the sides. */
+export const armsAway = (o: Observation) => {
+  const sh = (P(o, LM.leftShoulder).y + P(o, LM.rightShoulder).y) / 2, hp = (P(o, LM.leftHip).y + P(o, LM.rightHip).y) / 2;
+  return P(o, LM.leftWrist).y < lerp(sh, hp, 0.45) && P(o, LM.rightWrist).y < lerp(sh, hp, 0.45);
+};
 
 /** True when both wrists are above the nose (arms raised), so the silhouette top is the hands, not the head. */
 export const armsRaised = (o: Observation) => P(o, LM.leftWrist).y < P(o, LM.nose).y && P(o, LM.rightWrist).y < P(o, LM.nose).y;

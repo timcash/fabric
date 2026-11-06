@@ -22,25 +22,49 @@ Goal: a page that runs in a phone browser, uses the camera, and returns body mea
 | Metric scale from the user's height | It is the anchor used by commercial apps and BodyM. It needs no extra hardware and works on iOS Safari. The mask's head-to-heel span equals the stated height, which gives cm/px at the body plane. |
 | Levels from landmarks, widths from the mask | Landmarks are good at *where* a measurement goes but poor at *how wide* the body is. The silhouette is accurate there. Sub-pixel edges come from the soft mask. |
 | Heights, not pixel rows, link the views | Each view keeps its own scale, so a profile photo taken from a different distance still lines up with the front. |
-| **Turn-in-place girths via Cauchy's formula** | A tape follows the convex outline. The perimeter of a convex cross-section is the integral of its caliper width over half a turn, P = ∫₀^π w(θ) dθ. The phone stays fixed while the subject turns with arms raised in a V, so the torso is never hidden. Each frame gives w(θ) at the chest, waist and hip levels. Body symmetry folds θ into 0–90°. The angle comes from the 2D shoulder and hip spans (|cos θ|) rather than MediaPipe's noisy monocular depth. This makes no ellipse assumption: on a rounded-rectangle section the two-view ellipse is more than 3% off, while the turntable estimate is within 0.5% (see the unit tests). |
+| **Arms out for the whole scan** | Held straight out at shoulder height, the arms never cross the chest, waist or hip rows from any angle. In an A-pose or with arms down, they merge with the torso outline at oblique angles. The app requires the pose and does not measure frames without it. A frame is dropped only if an arm actually merges with the torso outline at that row. An arm hidden behind or in front of the torso does not count. |
+| **Turn-in-place girths via Cauchy's formula** | A tape follows the convex outline. The perimeter of a convex cross-section is the integral of its caliper width over half a turn, P = ∫₀^π w(θ) dθ. The phone stays fixed while the subject turns, and each frame gives w(θ). Body symmetry folds θ into 0–90°. The angle comes from the *horizontal* 2D shoulder and hip spans (|cos θ|). Perspective tilts the vertical component as the body turns, and MediaPipe's monocular depth is noisy. This makes no ellipse assumption: on a rounded-rectangle section the two-view ellipse is more than 3% off, while the turntable estimate is within 0.5% (see the unit tests). |
 | Two-view ellipse as the fallback | Front width plus profile depth with Ramanujan's perimeter. It is exact for elliptical sections. |
-| Off-profile leg correction | Near profile, the two legs no longer line up. The union is deeper by 2·L·|cos θ|, which is subtracted. |
+| Legs on the turntable | Wherever the legs separate in the image, each leg's width is read at its own scale and row, mapped from that leg's hip, knee and ankle landmarks. One leg swings nearer the camera (larger, and lower in the image below eye level) while the other recedes. Leg depth comes from the near-profile overlap at the nearer leg's scale (its lower percentile, when the far leg is fully hidden). |
+| Floor at the heels, with parallax | Toes pointing at the camera reach lower in the image than the heels: about 4% of scale at 2.5 m. The floor is taken at the heel landmarks. It is then shifted by the parallax of a heel about 3% of stature behind the body plane, assuming an upright phone with a typical 68° main-camera field of view. The front view's floor row and scale are reused for every turn frame. |
 | Plausibility gates | Chords that run away, sites outside adult width/height ranges, an implausible inseam, and bent arms are all dropped with a reason. A merged silhouette, such as a second person, is rejected rather than measured. |
 | Splat export instead of in-browser splatting | The turn frames, person masks, landmarks and scale are exported as a zip. Offline COLMAP/GLOMAP or MASt3R/VGGT, then gsplat or nerfstudio, can reconstruct them. Height or cm/px restores metric scale. |
 
 ## Accuracy, honestly
 
-On the synthetic body (exact ground truth, orthographic camera, perfect mask), every torso and leg girth is within 0.5% and lengths are within 0.5 cm. That checks the geometry, not the real world. Real error is dominated by the following:
+**Simulation with a 3D body.** The CC0 MakeHuman base mesh is posed with its CC0 skeleton and weights (arms out). A pinhole phone camera renders it, and the app scans it. Every measurement is scored against the posed mesh, sliced where the app measured and taken as the tape (convex hull) perimeter. The simulation uncovered real perspective problems that the earlier orthographic synthetic body could not:
+
+- A floor at the toe tips gave a 4% scale error.
+- A yaw estimate from 2D shoulder distance read 84° at a true 90°.
+- Near and far legs image at different rows and sizes.
+- With the camera high, a "widest hip" row landed below the crotch.
+- With the camera low, an over-cautious arm filter dropped valid frames.
+
+All are fixed. Errors in the current run against the mesh:
+
+- **Exact masks and joints (geometry only), five setups.** These cover camera height 70–130 cm, distance 2.5–3 m, field of view 66–72°, and body girth ×0.85–×1.25.
+  - Torso girths: within 2%.
+  - Thigh, knee and calf: within 5%. Ankle: within 6%.
+  - Neck: within 7%.
+  - Arms (circular or ratio-based): within 10–12%.
+  - Lengths: within 2.5 cm.
+- **MediaPipe on rendered frames (the real app pipeline).**
+  - Torso: +1.4% to +2.8%.
+  - Legs: −1.5% to +5.6%.
+  - Neck: +8%. Upper arm: +9%. Forearm: +14%.
+  - Inseam: −3.6 cm.
+
+  The ML mask runs slightly wide. The thresholds are deliberately not tuned to rendered data, because a mannequin is not a clothed person.
+
+Real error will be larger than either and is dominated by the following:
 
 - **Clothing and hair:** the mask follows fabric.
-- **Segmentation edges:** about 1–2 px. At 3 m from a 1080p portrait camera that is roughly 0.2–0.4 cm per edge.
-- **Posture:** the waist level, breathing and arm angle all move the result.
-- **Perspective and tilt:** keep the phone upright at waist height and 2.5–3 m away. The app shows a level check.
+- **Segmentation edges:** MediaPipe's mask edge is soft, about 1–2 px.
+- **Posture:** arm height, breathing and stance.
+- **Tilt and camera height:** the parallax correction assumes an upright phone.
 - **Height:** its error scales every measurement.
 
-The ± shown per measurement is a design estimate per method (turntable 2.5%, two-view 4%, circular limbs 7%, front-only 10%), not a validated figure.
-
-Validating against tape on real people is the next step. The Antwerp protocol (tape, stadiometer and a stereophotogrammetry reference) is a good template.
+The ± shown per measurement is a design estimate per method (turntable 2.5%, two-view 4%, circular limbs 7%, front-only 10%), not a validated figure. Validating against tape on real people is the next step. The Antwerp protocol (tape, stadiometer and a stereophotogrammetry reference) is a good template.
 
 ## Next steps
 

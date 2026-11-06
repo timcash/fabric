@@ -1,23 +1,24 @@
 /**
  * A Feed produces one Observation per animation frame plus a way to draw the matching image. The camera feed runs
- * MediaPipe on live video; the demo feed renders the synthetic body (posing and turning on cue), so the full
- * capture flow can be tried — and tested — without a camera or a person.
+ * MediaPipe on live video; the simulation feed (src/sim/sim-feed.ts) renders a 3D body mesh as the video, so the
+ * full capture flow can be tried — and tested against mesh ground truth — without a camera or a person.
  */
 import type { PoseSource } from './pose-mediapipe.ts';
-import { defaultBody, renderBody, type ArmPose } from './synthetic.ts';
 import type { Observation } from './types.ts';
 
 export type Step = 'front' | 'profile' | 'turn';
 export type Frame = { obs: Observation | null; width: number; height: number; draw(ctx: CanvasRenderingContext2D, w: number, h: number): void };
 
 export interface Feed {
-  readonly kind: 'camera' | 'demo';
+  readonly kind: 'camera' | 'sim';
   readonly mirror: boolean;
   frame(step: Step, stepElapsedMs: number): Promise<Frame | null>;
   /** Copy of the last frame's image at full resolution. */
   snapshot(): HTMLCanvasElement;
   tilt(): number | null;
   stop(): void;
+  /** Simulated feeds know when the body has turned a full circle. */
+  turnDone?(): boolean;
 }
 
 export class Tilt {
@@ -94,33 +95,4 @@ export function paintMask(o: Observation, color: [number, number, number] = [205
   ctx.fillStyle = '#ffffff10';
   ctx.fillRect(0, o.height * 0.93, o.width, o.height * 0.07);
   return c;
-}
-
-export class DemoFeed implements Feed {
-  readonly kind = 'demo';
-  readonly mirror = false;
-  private last: HTMLCanvasElement | null = null;
-  private start = performance.now();
-  /** turnMs: duration of one full synthetic turn. */
-  constructor(private turnMs = 7000, private size = { width: 480, height: 854 }) {}
-
-  async frame(step: Step, elapsed: number): Promise<Frame> {
-    await new Promise(r => setTimeout(r, 16));
-    let yawDeg = 0, pose: ArmPose = 'a-pose', sway = 0;
-    if (step === 'front') { pose = elapsed < 900 ? 'down' : 'a-pose'; sway = elapsed < 1500 ? Math.sin(elapsed / 90) * 6 : 0; }
-    if (step === 'profile') { pose = 'v-up'; yawDeg = elapsed < 700 ? 60 : 90; sway = elapsed < 1400 ? Math.sin(elapsed / 90) * 5 : 0; }
-    if (step === 'turn') { pose = elapsed < 600 ? 'a-pose' : 'v-up'; yawDeg = elapsed < 900 ? 0 : (360 * (elapsed - 900)) / this.turnMs; }
-    const obs = renderBody(defaultBody, { ...this.size, yawDeg, pose, centerPx: this.size.width / 2 + sway, timestamp: performance.now() - this.start });
-    const image = paintMask(obs);
-    this.last = image;
-    return { obs, width: obs.width, height: obs.height, draw: (ctx, w, h) => ctx.drawImage(image, 0, 0, w, h) };
-  }
-  snapshot() {
-    const c = document.createElement('canvas');
-    c.width = this.last?.width ?? 1; c.height = this.last?.height ?? 1;
-    if (this.last) c.getContext('2d')!.drawImage(this.last, 0, 0);
-    return c;
-  }
-  tilt() { return 0.4; }
-  stop() {}
 }

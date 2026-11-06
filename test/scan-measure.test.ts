@@ -38,14 +38,14 @@ test('mask runs and chords are sub-pixel accurate', () => {
   const [run] = rowRuns(mask, 1.5);
   near(run.x0, 10.3, 0.1, 'left edge');
   near(run.x1, 25.6, 0.1, 'right edge');
-  const o = renderBody(body, { pose: 'a-pose' });
+  const o = renderBody(body, { pose: 'arms-out' });
   const c = chordAlong(o.mask, { x: 360, y: 600 }, { x: 1, y: 0 });
   assert.ok(c && c.length > 0);
   const ext = verticalExtent(o.mask, { x: 360, y: 600 })!;
   near((ext.bottom - ext.top) * (175 / (1280 * 0.82)), 175, 0.3, 'silhouette height');
 });
 
-const front = analyzeFront(renderBody(body, { pose: 'a-pose' }), { kind: 'height', heightCm: body.heightCm })!;
+const front = analyzeFront(renderBody(body, { pose: 'arms-out' }), { kind: 'height', heightCm: body.heightCm, lens: 'orthographic' })!;
 
 test('front view: widths, levels and lengths match the synthetic body', () => {
   assert.ok(front, 'front analysis');
@@ -58,12 +58,11 @@ test('front view: widths, levels and lengths match the synthetic body', () => {
   near(front.lengths.armLength!.cm, 56, 0.3, 'arm length');
   near(front.lengths.legLength!.cm, 88, 0.3, 'hip-joint height');
   near(front.lengths.torsoLength!.cm, 56, 0.3, 'torso length');
-  near(front.lengths.shoulderBreadth!.cm, 2 * (18 + 6 / Math.cos(armAngle('a-pose'))), 0.6, 'bideltoid breadth');
-  near(front.sites.bicep!.widthCm, 2 * truth.armRadius(body, 0.35 * 30), 0.4, 'upper-arm width');
+  near(front.lengths.shoulderBreadth!.cm, 36, 0.3, 'shoulder joint span');
 });
 
 test('two-view girths are within 2% of the tape-measure truth', () => {
-  const side = analyzeSide(renderBody(body, { pose: 'v-up', yawDeg: 90 }), front, { kind: 'fixed', cmPerPx: front.scale.cmPerPx })!;
+  const side = analyzeSide(renderBody(body, { pose: 'arms-out', yawDeg: 90 }), front, { kind: 'fixed', cmPerPx: front.scale.cmPerPx, floorY: front.scale.floorY })!;
   assert.ok(side);
   const report = buildReport(front, side);
   const by = Object.fromEntries(report.measurements.map(m => [m.id, m]));
@@ -78,7 +77,7 @@ test('two-view girths are within 2% of the tape-measure truth', () => {
 test('turntable samples at many angles give turntable girths', () => {
   const samples = [];
   for (let yaw = 0; yaw <= 360; yaw += 9) {
-    const s = analyzeTurnFrame(renderBody(body, { pose: 'v-up', yawDeg: yaw, timestamp: yaw }), front);
+    const s = analyzeTurnFrame(renderBody(body, { pose: 'arms-out', yawDeg: yaw, timestamp: yaw }), front);
     if (s) samples.push(s);
   }
   assert.ok(samples.length > 30);
@@ -99,7 +98,7 @@ test('front-only scans fall back to labelled estimates', () => {
 
 test('near-profile frames: leg depth corrects for leg spacing; raised arms skip the neck', () => {
   const yaw = 84;
-  const side = analyzeSide(renderBody(body, { pose: 'v-up', yawDeg: yaw }), front, { kind: 'fixed', cmPerPx: front.scale.cmPerPx }, yaw * DEG)!;
+  const side = analyzeSide(renderBody(body, { pose: 'arms-out', yawDeg: yaw }), front, { kind: 'fixed', cmPerPx: front.scale.cmPerPx, floorY: front.scale.floorY }, yaw * DEG)!;
   assert.equal(side.sites.neck, undefined);
   const report = buildReport(front, side);
   for (const s of ['thigh', 'knee', 'calf', 'ankle'] as const) {
@@ -111,9 +110,16 @@ test('near-profile frames: leg depth corrects for leg spacing; raised arms skip 
 });
 
 test('a second person touching the subject is rejected instead of measured', () => {
-  const o = renderBody(body, { pose: 'a-pose' });
-  for (let y = 300; y < 1100; y++) for (let x = 470; x < 720; x++) o.mask.data[y * o.width + x] = 1; // someone standing against the left arm
-  const a = analyzeFront(o, { kind: 'height', heightCm: body.heightCm })!;
+  const o = renderBody(body, { pose: 'arms-out' });
+  for (let y = 300; y < 1100; y++) for (let x = 450; x < 720; x++) o.mask.data[y * o.width + x] = 1; // someone standing against the torso
+  const a = analyzeFront(o, { kind: 'height', heightCm: body.heightCm, lens: 'orthographic' })!;
   assert.ok(a.warnings.some(w => /implausible|touching/.test(w)), a.warnings.join(' | '));
   for (const [name, s] of Object.entries(a.sites)) assert.ok(s!.widthCm < 0.35 * body.heightCm, `${name} ${s!.widthCm}`);
+});
+
+test('stillness works on slow devices (frames far apart)', async () => {
+  const { Stillness } = await import('../src/scan/quality.ts');
+  const still = new Stillness();
+  for (let i = 0; i < 4; i++) still.push(renderBody(body, { timestamp: i * 900 }));
+  assert.ok(still.motion(1000) < 0.012);
 });

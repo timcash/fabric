@@ -6,45 +6,66 @@ Fabric starts from [timcash/template](https://github.com/timcash/template) (Vite
 npm ci
 npm run dev      # also fetches the pose model into public/mediapipe/
 # open http://127.0.0.1:5173/scan.html  (a phone needs https: deploy, or tunnel the dev server)
+npm run test:sim # simulated scan of a 3D body, scored against the mesh, recorded as a video
 ```
 
-The deck's masthead links to the scanner. Try it without a camera at `/scan.html?demo=1`, which runs the full flow on a synthetic body with known girths and shows measured beside true values.
+The deck's masthead links to the scanner. **Simulate a scan (3D body)** runs the whole app on a rendered CC0 human mesh instead of the camera: `/scan.html?sim=1`, or `&detector=oracle` for exact masks.
 
-## How a scan works
+## How a scan works: arms out, the whole time
 
 1. **Setup:** enter your height; it sets the metric scale. Prop the phone upright at waist height and stand 2.5–3 m away.
-2. **Front:** face the camera with arms 30–45° out and feet hip-width apart. Live checks cover body detected, framing, facing, arms, feet, stillness and phone level. When all pass, a countdown captures six frames and takes their median.
-3. **Turn:** raise both arms in a V and turn slowly through one full circle. Each frame gives the torso's caliper width at the chest, waist and hip from one angle. A dial shows the angles covered so far.
-4. **Results:** 11 girths and 7 lengths, each with its method and an expected ±. The results page also shows a 3D cross-section view and annotated front and profile frames. You can export CSV or JSON, or a **capture package** (frames, person masks, landmarks and scale) for offline photogrammetry or Gaussian-splat training.
+2. **Front:** face the camera with **both arms straight out to the sides at shoulder height, palms down**, feet hip-width apart. Live checks cover body detected, framing, facing, arms out, feet, stillness and phone level. When all pass, a countdown captures six frames and takes their median.
+3. **Turn:** keep the arms out and turn slowly through one full circle. Frames with the arms down are shown but never measured. Each frame gives caliper widths from one angle: the torso at the chest, waist and hip, and each leg wherever the legs separate. A dial shows the angles covered so far.
+4. **Results:** 11 girths and 8 lengths, each with its method and an expected ±. The page also shows a 3D cross-section view and annotated front and profile frames. You can export CSV or JSON, or a **capture package** (frames, person masks, landmarks and scale) for offline photogrammetry or Gaussian-splat training.
 
-There is also a **two-photo mode** (front, plus an optional side photo) and a quicker **profile instead of turn** option.
+Why arms out: held at shoulder height, the arms never cross the chest, waist or hip levels from any angle. With arms down or in an A-pose, they merge with the torso outline at oblique angles and inflate the girths.
 
 | Measurement | Method |
 | --- | --- |
-| Chest, waist, hip | **Turntable:** caliper widths by angle integrated with Cauchy's formula, P = ∫₀^π w(θ) dθ. This is the convex outline a tape follows, with no ellipse assumed. Falls back to two-view (front width plus profile depth, as an ellipse), then to a front-only estimate. |
-| Neck, thigh, knee, calf, ankle | Two-view ellipse, or a circular section without a profile view. |
-| Upper arm, forearm, wrist | Perpendicular limb width, circular section. |
-| Shoulder breadth, inseam, shoulder–crotch, waist height | Silhouette distances. |
-| Arm length, hip-joint height, torso length | Pose-landmark distances. |
+| Chest, waist, hip, thigh, knee, calf, ankle | **Turntable:** caliper widths by angle integrated with Cauchy's formula, P = ∫₀^π w(θ) dθ. This is the convex outline a tape follows, with no ellipse assumed. Legs are read where they separate, and each leg uses its own hip/knee/ankle landmarks to correct for perspective as it swings nearer or farther. Leg depth comes from the near-profile overlap. Falls back to two-view, then to front-only estimates. |
+| Neck, wrist | Front width and a typical cross-section ratio (arms out hide their depth from every angle). |
+| Upper arm, forearm | Perpendicular limb width, circular section. |
+| Arm span, inseam, shoulder–crotch, waist height | Silhouette distances. |
+| Shoulder span, arm length, hip-joint height, torso length | Pose-landmark distances. |
 
-How it is built: MediaPipe Pose Landmarker (33 landmarks plus a person mask) runs in WebAssembly and WebGL. The landmarks place each measurement level, and the soft mask gives sub-pixel widths. Heights above the floor, not pixel rows, link the views. Plausibility gates reject merged silhouettes, such as two people touching, bent arms, or a crotch that cannot be found, instead of reporting nonsense.
+How it is built: MediaPipe Pose Landmarker (33 landmarks plus a person mask) runs in WebAssembly and WebGL. The floor is taken at the heels with a parallax correction, because toes pointing at the camera reach lower in the image. That reach is worth about 4% of scale. The front view's floor and scale carry to every turn frame. Plausibility gates reject merged silhouettes, bent arms and a lost crotch instead of reporting nonsense.
 
-Research notes, design rationale and an honest accuracy discussion are in **[docs/body-scan-research.md](docs/body-scan-research.md)**. Accuracy is verified against a synthetic body: torso and leg girths within 0.5%, lengths within 0.5 cm. It has **not yet been validated against tape measures on real people**. Clothing, hair, posture and tilt dominate real-world error.
+## Simulation: a 3D body as ground truth
+
+[`src/sim/`](src/sim) poses the **CC0 MakeHuman base mesh** ([public/sim/makehuman](public/sim/makehuman)) with its CC0 skeleton and skin weights. It straightens the elbows and raises the arms to a T with linear blend skinning. A pinhole phone camera (portrait, 66° field of view, 2.5 m away, 1 m high) renders it as "photos". The app's own pipeline then scans it: front frame, then one full turn. Ground truth is the posed mesh sliced where the app measured (each chord's image row is back-projected through the camera), measured like a tape: the convex hull of the cross-section.
+
+- `npm test` includes [test/sim-makehuman.test.ts](test/sim-makehuman.test.ts). It uses exact masks and joints from a software rasterizer across five setups: camera at 70, 100 and 130 cm; 2.5–3 m; 66–72° field of view; and body shapes ×0.85 to ×1.25 in girth.
+- `npm run test:sim` renders the body with three.js in Chrome and runs **the real MediaPipe model on every rendered frame** through the actual app UI. It writes to `test-results/body-scan-sim/`:
+  - `body-scan-simulation.mp4`: setup → front capture → 360° turn (with an outside view of the phone and body) → results, with mesh truth and the true mesh drawn under the measured rings.
+  - `photos/`: rendered photos at 0°, 45°, 90°, 135° and 180°.
+  - `report.md` and `report.json`: measured vs mesh truth for both MediaPipe and the oracle.
+
+Latest run (166.6 cm body, default camera; MediaPipe figures vary by a few tenths of a percent between runs):
+
+| | Chest | Waist | Hip | Thigh | Knee | Calf | Ankle | Neck | Upper arm | Inseam |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Oracle (exact mask) | −0.7% | −0.4% | −0.4% | +1.1% | −1.4% | −1.7% | −3.5% | +0.7% | +4.4% | −1.3 cm |
+| MediaPipe on renders | +2.8% | +1.4% | +1.6% | +5.6% | −1.5% | +2.3% | +2.7% | +8.2% | +8.7% | −3.6 cm |
+
+The oracle row isolates the geometry: perspective, the turn and the girth formula. The MediaPipe row adds the ML model's segmentation and landmark error. Its mask runs slightly wide, about +2% on the torso. A rendered mannequin is not a person in clothes, so real-world error will be larger. The tape-measure validation in [docs/body-scan-research.md](docs/body-scan-research.md) is still to do.
 
 | Path | Purpose |
 | --- | --- |
-| `src/scan/measure.ts` | Front/profile silhouette anthropometry, plausibility gates, multi-frame median |
-| `src/scan/turntable.ts` | Yaw from projected spans, angle bins, Cauchy girth |
+| `src/scan/measure.ts` | Front/profile silhouette anthropometry, heel floor and parallax, plausibility gates, multi-frame median |
+| `src/scan/turntable.ts` | Yaw from horizontal spans, torso and per-leg widths by angle, Cauchy girth |
 | `src/scan/geometry.ts`, `mask.ts` | Ellipse/Cauchy perimeters; sub-pixel runs, chords, connected vertical extent |
-| `src/scan/synthetic.ts` | Parametric body with exact ground truth (tests and demo) |
-| `src/scan/quality.ts` | Live capture checks |
-| `src/scan/pose-mediapipe.ts`, `feeds.ts` | Self-hosted MediaPipe, camera/demo feeds, tilt |
+| `src/scan/quality.ts` | Live capture checks, including arms out |
+| `src/scan/pose-mediapipe.ts`, `feeds.ts` | Self-hosted MediaPipe, camera feed, tilt |
 | `src/scan/main.ts`, `scan.html`, `scan.css` | Capture flow and results UI |
-| `src/scan/view3d.ts`, `capture-package.ts` | 3D cross-sections; zip export for splatting |
+| `src/scan/view3d.ts`, `capture-package.ts` | 3D cross-sections (with the true mesh in simulation); zip export for splatting |
+| `src/scan/synthetic.ts` | Orthographic parametric body for fast geometry unit tests |
+| `src/sim/makehuman.ts`, `camera.ts`, `truth.ts`, `compare.ts` | Mesh loading and posing, pinhole camera and rasterizer, mesh slicing, scoring |
+| `src/sim/sim-feed.ts`, `observe.ts` | three.js render feed (MediaPipe or oracle) and exact observations |
+| `scripts/sim-oracle.ts`, `scripts/sim-video-test.ts` | Node simulation; recorded browser simulation |
+| `scripts/scan-browser-test.ts` | Phone-size browser test under the production CSP: simulated scan, photo mode on rendered photos, fake camera |
 | `scripts/prepare-pose-assets.ts` | Copies the WASM runtime and downloads `pose_landmarker_full.task` (runs before dev/build) |
-| `test/scan-measure.test.ts`, `scripts/scan-browser-test.ts` | Unit tests; browser test under the production CSP (demo, photo mode, fake camera) |
 
-`npm run test:scan` runs the browser test. Set `SCAN_TEST_PHOTO=/path/to/photo.jpg` to also require a full measurement from a real photo. **Run it on a phone.** The camera needs https, so pick one of these:
+**Run it on a phone.** The camera needs https, so pick one of these:
 
 - **GitHub Pages:** in repository Settings → Pages, set Source to *GitHub Actions*. [.github/workflows/pages.yml](.github/workflows/pages.yml) then deploys on every push to `main`, building with `BASE_PATH=/<repo>/`. Open `https://<user>.github.io/fabric/scan.html`.
 - **Cloudflare:** rename the Worker in `wrangler.jsonc` if you like, then run `npm run deploy`. `public/_headers` allows `camera=(self)` and `'wasm-unsafe-eval'`; everything else stays `'self'`.

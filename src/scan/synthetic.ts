@@ -9,7 +9,7 @@ import { DEG, ellipsePerimeter, lerp } from './geometry.ts';
 import { LANDMARK_COUNT, LM, type Landmark, type Observation } from './types.ts';
 
 type Key = readonly [h: number, a: number, b: number];
-export type ArmPose = 'a-pose' | 'v-up' | 'down';
+export type ArmPose = 'arms-out' | 'a-pose' | 'down';
 
 export type BodySpec = {
   heightCm: number;
@@ -63,7 +63,8 @@ function armRadius(spec: BodySpec, s: number): number {
   for (let i = 1; i < k.length; i++) if (s <= k[i][0]) return lerp(k[i - 1][1], k[i][1], (s - k[i - 1][0]) / (k[i][0] - k[i - 1][0]));
   return k[k.length - 1][1];
 }
-export const armAngle = (pose: ArmPose) => (pose === 'a-pose' ? 35 : pose === 'v-up' ? 155 : 6) * DEG;
+/** Arm angle from hanging straight down. 'arms-out' is a near-T-pose (horizontal slices stay well-defined). */
+export const armAngle = (pose: ArmPose) => (pose === 'arms-out' ? 82 : pose === 'a-pose' ? 35 : 6) * DEG;
 
 /** Ground-truth girths (cm) a tape would read at a level. */
 export const truth = {
@@ -110,7 +111,7 @@ export type RenderOptions = {
 
 /** Renders the body orthographically into an anti-aliased mask and MediaPipe-style landmarks. */
 export function renderBody(spec: BodySpec = defaultBody, options: RenderOptions = {}): Observation {
-  const { yawDeg = 0, pose = 'a-pose', width = 720, height = 1280, timestamp = 0 } = options;
+  const { yawDeg = 0, pose = 'arms-out', width = 720, height = 1280, timestamp = 0 } = options;
   const cmPerPx = options.cmPerPx ?? spec.heightCm / (height * 0.82);
   const floorPx = options.floorPx ?? height * 0.93;
   const centerPx = options.centerPx ?? width / 2;
@@ -162,7 +163,7 @@ function jointPositions(spec: BodySpec, pose: ArmPose): Record<number, [number, 
   both(LM.leftHip, LM.rightHip, spec.hipJoint.x, spec.hipJoint.y, 0);
   both(LM.leftKnee, LM.rightKnee, spec.legX, spec.kneeY, 0);
   both(LM.leftAnkle, LM.rightAnkle, spec.legX, spec.ankleY, 0);
-  both(LM.leftHeel, LM.rightHeel, spec.legX, 2, -4);
+  both(LM.leftHeel, LM.rightHeel, spec.legX, 0, -4); // floor contact at the back of the heel
   both(LM.leftFootIndex, LM.rightFootIndex, spec.legX, 1, 14);
   for (const i of [1, 2, 3]) j[i] = [3.2, spec.head.y, spec.head.b - 2]; // left eye group
   for (const i of [4, 5, 6]) j[i] = [-3.2, spec.head.y, spec.head.b - 2];
