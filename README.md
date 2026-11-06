@@ -9,13 +9,20 @@ npm run dev      # also fetches the pose model into public/mediapipe/
 npm run test:sim # simulated scan of a 3D body, scored against the mesh, recorded as a video
 ```
 
-The deck's masthead links to the scanner. **Simulate a scan (3D body)** runs the whole app on a rendered CC0 human mesh instead of the camera: `/scan.html?sim=1`, or `&detector=oracle` for exact masks.
+The deck's masthead links to the scanner. **Simulate a scan (3D body)** runs the whole app on a rendered CC0 human mesh in a furnished room, with a helper walking around, instead of the camera. Use `/scan.html?sim=1`; add `&detector=oracle` for exact masks or `&scenario=turn` for the turn-on-the-spot setup.
 
 ## How a scan works: arms out, the whole time
 
-1. **Setup:** enter your height; it sets the metric scale. Prop the phone upright at waist height and stand 2.5–3 m away.
-2. **Front:** face the camera with **both arms straight out to the sides at shoulder height, palms down**, feet hip-width apart. Live checks cover body detected, framing, facing, arms out, feet, stillness and phone level. When all pass, a countdown captures six frames and takes their median.
-3. **Turn:** keep the arms out and turn slowly through one full circle. Frames with the arms down are shown but never measured. Each frame gives caliper widths from one angle: the torso at the chest, waist and hip, and each leg wherever the legs separate. A dial shows the angles covered so far.
+1. **Setup:** enter your height; it sets the metric scale. Choose how you'll scan:
+   - **A helper walks around you with the phone** (recommended).
+   - **Prop the phone and turn on the spot.**
+   - **Quick: front and side only.**
+2. **Front:** the subject faces the camera with **both arms straight out to the sides at shoulder height, palms down**, feet hip-width apart, about 2.5 m away. Live checks cover body detected, framing, facing, arms out, feet, stillness and phone level. When all pass, a countdown captures six frames and takes their median.
+3. **Walk around (or turn):** the helper walks one slow circle around the still subject, keeping them head to feet in frame. Without a helper, the subject turns on the spot in front of a propped phone instead.
+   - Every frame is **leveled with the phone's gravity sensor**: a pure rotation about the lens.
+   - Every frame gets its **own metric scale** from the subject's height, so the phone's distance, height and wobble don't matter.
+   - Each frame gives caliper widths from one angle: the torso at the chest, waist and hip, and each leg wherever the legs separate. It also gives an estimate of **where the camera was**: its angle around the subject, distance and height.
+   - Frames with the arms down are shown but never measured. A dial shows how much of the circle is covered.
 4. **Results:** 11 girths and 8 lengths, each with its method and an expected ±. The page also shows a 3D cross-section view and annotated front and profile frames. You can export CSV or JSON, or a **capture package** (frames, person masks, landmarks and scale) for offline photogrammetry or Gaussian-splat training.
 
 Why arms out: held at shoulder height, the arms never cross the chest, waist or hip levels from any angle. With arms down or in an A-pose, they merge with the torso outline at oblique angles and inflate the girths.
@@ -30,29 +37,50 @@ Why arms out: held at shoulder height, the arms never cross the chest, waist or 
 
 How it is built: MediaPipe Pose Landmarker (33 landmarks plus a person mask) runs in WebAssembly and WebGL. The floor is taken at the heels with a parallax correction, because toes pointing at the camera reach lower in the image. That reach is worth about 4% of scale. The front view's floor and scale carry to every turn frame. Plausibility gates reject merged silhouettes, bent arms and a lost crotch instead of reporting nonsense.
 
+### Moving-camera scans, and NVIDIA MetricTrail
+
+[NVIDIA MetricTrail](https://huggingface.co/nvidia/MetricTrail) (model card dated 11/05/2026) estimates **metric camera motion and per-frame metric depth from a monocular RGB sequence**. It combines a single-image metric-depth model (MoGe-2), learned sparse correspondences (DPVO with a DINOv3 encoder), and local bundle adjustment. It can't run in this app:
+
+- It needs a CUDA GPU.
+- Its checkpoint is "released separately" (not yet available).
+- Its licence limits it to non-commercial research.
+- It has no browser build.
+- The card notes it uses no dynamic-object handling.
+
+The walk-around mode borrows its central idea: **re-anchor metric scale in every frame from a metric prior, and recover the camera's motion**. Here the prior is the subject's known height plus the phone's gravity vector. That is exactly enough for this problem: the subject stands still, and the measurements only need each frame's metric scale, floor line and viewing angle. A static subject also makes the capture what visual odometry expects: a static scene filmed by a moving camera. So the capture package (frames, masks, per-frame camera estimates, gravity, intrinsics guess) is ready for offline reconstruction with MetricTrail, COLMAP/GLOMAP or MASt3R/VGGT, and Gaussian splatting.
+
 ## Simulation: a 3D body as ground truth
 
 [`src/sim/`](src/sim) poses the **CC0 MakeHuman base mesh** ([public/sim/makehuman](public/sim/makehuman)) with its CC0 skeleton and skin weights. It straightens the elbows and raises the arms to a T with linear blend skinning. A pinhole phone camera (portrait, 66° field of view, 2.5 m away, 1 m high) renders it as "photos". The app's own pipeline then scans it: front frame, then one full turn. Ground truth is the posed mesh sliced where the app measured (each chord's image row is back-projected through the camera), measured like a tape: the convex hull of the cross-section.
 
 - `npm test` includes [test/sim-makehuman.test.ts](test/sim-makehuman.test.ts). It uses exact masks and joints from a software rasterizer across five setups: camera at 70, 100 and 130 cm; 2.5–3 m; 66–72° field of view; and body shapes ×0.85 to ×1.25 in girth.
-- `npm run test:sim` renders the body with three.js in Chrome and runs **the real MediaPipe model on every rendered frame** through the actual app UI. It writes to `test-results/body-scan-sim/`:
-  - `body-scan-simulation.mp4`: setup → front capture → 360° turn (with an outside view of the phone and body) → results, with mesh truth and the true mesh drawn under the measured rings.
-  - `photos/`: rendered photos at 0°, 45°, 90°, 135° and 180°.
-  - `report.md` and `report.json`: measured vs mesh truth for both MediaPipe and the oracle.
+- `npm test` also covers the walk-around with exact masks and joints ([src/sim/path.ts](src/sim/path.ts)). The handheld phone's distance (±2 cm), height (±6 cm with walking bob), aim (±3°), pitch (−3 ± 3°) and roll (±3°) wander, and the gravity reading has 0.4° of noise.
+- `npm run test:sim` renders the scene with three.js in Chrome: the subject stands in a **furnished room** ([src/sim/room.ts](src/sim/room.ts)) while **a helper, a second MakeHuman body holding the phone, walks around them**. It runs **the real MediaPipe model on every rendered frame** through the actual app UI. It writes to `test-results/body-scan-sim/`:
+  - `body-scan-simulation.mp4`: setup → front capture → walk-around (with a cut-away view of the room, helper and phone) → results, with mesh truth, the true mesh under the measured rings, and the estimated vs true camera path.
+  - `photos/`: rendered photos from the helper's walk every 45°.
+  - `report.md` and `report.json`: measured vs mesh truth and camera-path error. These cover MediaPipe on the walk-around, and the oracle on both the walk-around and the turn-on-the-spot scenarios.
 
-Latest run (166.6 cm body, default camera; MediaPipe figures vary by a few tenths of a percent between runs):
+Latest run (166.6 cm body; MediaPipe figures vary a little between runs):
 
-| | Chest | Waist | Hip | Thigh | Knee | Calf | Ankle | Neck | Upper arm | Inseam |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Oracle (exact mask) | −0.7% | −0.4% | −0.4% | +1.1% | −1.4% | −1.7% | −3.5% | +0.7% | +4.4% | −1.3 cm |
-| MediaPipe on renders | +2.8% | +1.4% | +1.6% | +5.6% | −1.5% | +2.3% | +2.7% | +8.2% | +8.7% | −3.6 cm |
+| | Chest | Waist | Hip | Thigh | Knee | Calf | Ankle | Neck | Upper arm | Inseam | Camera path |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Walk-around, MediaPipe in the room | +0.9% | +1.9% | +2.7% | +4.1% | −0.3% | +0.3% | +2.1% | +14% | +0.9% | −3.6 cm | 4.4° angle, 1.5 cm height, 5 cm distance |
+| Walk-around, oracle | +0.2% | +0.1% | −0.1% | +1.2% | −1.1% | −1.8% | −3.4% | +1.8% | +0.8% | −1.5 cm | 0.5° angle, 1.0 cm height, 10 cm distance |
+| Turn on the spot, oracle | −0.7% | −0.4% | −0.4% | +1.1% | −1.4% | −1.7% | −3.5% | +0.7% | +4.4% | −1.3 cm | |
 
-The oracle row isolates the geometry: perspective, the turn and the girth formula. The MediaPipe row adds the ML model's segmentation and landmark error. Its mask runs slightly wide, about +2% on the torso. A rendered mannequin is not a person in clothes, so real-world error will be larger. The tape-measure validation in [docs/body-scan-research.md](docs/body-scan-research.md) is still to do.
+The oracle rows isolate the geometry: perspective, leveling, the walk and the girth formula. The MediaPipe row adds the ML model's segmentation and landmark error against a cluttered room. Its mask runs slightly wide.
+
+The front-only neck estimate is the weakest number, especially from a handheld front view at chest height. Across runs the walk-around oracle's chest has ranged from −4% to 0% and its neck from +2% to +16%: with arms out, this body's chest girth changes about 1.7 cm per centimetre of height just below the armpits, so the exact front frame chosen matters. Torso levels in walk-around frames are placed between that frame's own shoulder- and hip-joint landmarks, which keeps that spread small.
+
+Camera distance is the least certain part of the path. It assumes a typical 68° phone lens, while the simulated lens is 66°; MetricTrail estimates the intrinsics instead. Only the camera path depends on that lens guess; the measurements don't.
+
+A rendered mannequin is not a person in clothes, so real-world error will be larger. The tape-measure validation in [docs/body-scan-research.md](docs/body-scan-research.md) is still to do.
 
 | Path | Purpose |
 | --- | --- |
 | `src/scan/measure.ts` | Front/profile silhouette anthropometry, heel floor and parallax, plausibility gates, multi-frame median |
-| `src/scan/turntable.ts` | Yaw from horizontal spans, torso and per-leg widths by angle, Cauchy girth |
+| `src/scan/turntable.ts` | Turn and walk-around frames: per-frame scale, yaw, camera estimate and path, torso and per-leg widths by angle, Cauchy girth |
+| `src/scan/rectify.ts` | Levels a handheld frame with the phone's gravity reading (mask and landmarks) |
 | `src/scan/geometry.ts`, `mask.ts` | Ellipse/Cauchy perimeters; sub-pixel runs, chords, connected vertical extent |
 | `src/scan/quality.ts` | Live capture checks, including arms out |
 | `src/scan/pose-mediapipe.ts`, `feeds.ts` | Self-hosted MediaPipe, camera feed, tilt |
@@ -60,7 +88,8 @@ The oracle row isolates the geometry: perspective, the turn and the girth formul
 | `src/scan/view3d.ts`, `capture-package.ts` | 3D cross-sections (with the true mesh in simulation); zip export for splatting |
 | `src/scan/synthetic.ts` | Orthographic parametric body for fast geometry unit tests |
 | `src/sim/makehuman.ts`, `camera.ts`, `truth.ts`, `compare.ts` | Mesh loading and posing, pinhole camera and rasterizer, mesh slicing, scoring |
-| `src/sim/sim-feed.ts`, `observe.ts` | three.js render feed (MediaPipe or oracle) and exact observations |
+| `src/sim/sim-feed.ts`, `observe.ts` | three.js render feed (MediaPipe or oracle; room + helper, or turn) and exact observations |
+| `src/sim/room.ts`, `path.ts` | The furnished room; the helper's handheld walk and gravity-sensor noise |
 | `scripts/sim-oracle.ts`, `scripts/sim-video-test.ts` | Node simulation; recorded browser simulation |
 | `scripts/scan-browser-test.ts` | Phone-size browser test under the production CSP: simulated scan, photo mode on rendered photos, fake camera |
 | `scripts/prepare-pose-assets.ts` | Copies the WASM runtime and downloads `pose_landmarker_full.task` (runs before dev/build) |

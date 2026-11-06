@@ -82,7 +82,8 @@ function compose(a: Xform, b: Xform): Xform {
   return { r: [ex[0], ey[0], ez[0], ex[1], ey[1], ez[1], ex[2], ey[2], ez[2]], pivot: [0, 0, 0], t: o };
 }
 
-export type PoseSpec = { armDeg: number }; // arm angle from hanging straight down: 90 = T-pose
+/** Arm angle from hanging straight down (90 = horizontal), raised sideways (coronal: a T) or forward (sagittal). */
+export type PoseSpec = { armDeg: number; plane?: 'coronal' | 'sagittal' };
 export type PosedBody = { positions: Float32Array; boneXform: Map<string, Xform>; model: BodyModel; pose: PoseSpec };
 
 function descendants(model: BodyModel, name: string): string[] {
@@ -99,7 +100,8 @@ export function poseBody(model: BodyModel, pose: PoseSpec): PosedBody {
     const sh = model.bones.get(`upperarm01.${side}`)!.head, el = model.bones.get(`lowerarm01.${side}`)!.head, wr = model.bones.get(`wrist.${side}`)!.head;
     const straighten: Xform = { r: rotationBetween(sub(wr, el), sub(el, sh)), pivot: el, t: [0, 0, 0] };
     const a = (pose.armDeg * Math.PI) / 180;
-    const raise: Xform = { r: rotationBetween(sub(el, sh), [sgn * Math.sin(a), -Math.cos(a), 0]), pivot: sh, t: [0, 0, 0] };
+    const target: Vec3 = pose.plane === 'sagittal' ? [sgn * 0.12 * Math.sin(a), -Math.cos(a), Math.sin(a)] : [sgn * Math.sin(a), -Math.cos(a), 0];
+    const raise: Xform = { r: rotationBetween(sub(el, sh), target), pivot: sh, t: [0, 0, 0] };
     for (const b of descendants(model, `upperarm01.${side}`)) xf.set(b, raise);
     const both = compose(raise, straighten);
     for (const b of descendants(model, `lowerarm01.${side}`)) xf.set(b, both);

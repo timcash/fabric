@@ -30,3 +30,14 @@ for (const c of cases) {
     assert.equal(failures.length, 0, `\n${comparisonTable(rows)}\nOver the limit: ${failures.map(f => f.id).join(', ')}`);
   });
 }
+
+test('mesh truth: a helper walks around with a handheld phone (orbit)', async () => {
+  const { simulateOrbit } = await import('../scripts/sim-oracle.ts');
+  const { rows, trajectory, coveredDeg } = simulateOrbit(loadSimBody(), 90);
+  const limits: Record<string, number> = { chest: 4, waist: 3, hip: 3, thigh: 5, knee: 7, calf: 5, ankle: 8, neck: 13, bicep: 10, forearm: 10, wrist: 12 };
+  const failures = rows.filter(r => (r.id in limits ? Math.abs(r.errorPct) > limits[r.id] : Math.abs(r.errorCm) > LENGTH_LIMIT_CM));
+  assert.equal(failures.length, 0, `\n${comparisonTable(rows)}\nOver the limit: ${failures.map(f => f.id).join(', ')}`);
+  assert.ok(coveredDeg > 340, `covered ${coveredDeg}°`);
+  // Camera path from the subject's height alone: angle and height are tight; distance carries the lens-FOV guess.
+  assert.ok(trajectory.angleErrDeg < 3 && trajectory.heightErrCm < 3 && trajectory.ateCm < 20, JSON.stringify(trajectory));
+});

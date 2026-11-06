@@ -60,7 +60,7 @@ try {
     await page.waitForFunction(() => document.querySelector('#checks li[data-check="arms"]')?.getAttribute('data-ok') === 'false', { timeout: 30000 });
     await page.waitForFunction(() => document.querySelector('#checks li[data-check="arms"]')?.getAttribute('data-ok') === 'true', { timeout: 30000 });
     await page.screenshot({ path: join(output, '2-front-checks.png') });
-    await page.waitForFunction(() => document.getElementById('step-title')?.textContent === 'Turn', { timeout: 60000 });
+    await page.waitForFunction(() => ['Turn', 'Walk around'].includes(document.getElementById('step-title')?.textContent ?? ''), { timeout: 60000 });
     await page.waitForFunction(() => !document.getElementById('turn-dial')?.hidden && parseInt(document.getElementById('dial-label')!.textContent!) > 40, { timeout: 60000 });
     await page.screenshot({ path: join(output, '3-turn.png') });
     await screen(page, 'results');

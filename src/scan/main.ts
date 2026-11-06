@@ -3,11 +3,12 @@ import { DEG, foldAngle } from './geometry.ts';
 import { analyzeFront, analyzeSide, armsRaised, combineAnalyses, hipScale, type FrontAnalysis, type SideAnalysis } from './measure.ts';
 import { allOk, evaluate, Stillness, type Check } from './quality.ts';
 import { buildReport, CM_PER_INCH, formatLength, LABELS, METHOD_TEXT, toCsv, type Report, type Units } from './report.ts';
-import { analyzeTurnFrame, coverage, yawOf, BIN_COUNT, type TurnSample } from './turntable.ts';
+import { analyzeTurnFrame, cameraPath, circleCoverage, unwrapAngles, yawOf, type AroundMode, type TurnSample } from './turntable.ts';
+import { rectify } from './rectify.ts';
 import { CameraFeed, paintMask, Tilt, type Feed, type Frame, type Step } from './feeds.ts';
 import { drawAnalysis, drawGuide, drawLive, renderChecks } from './overlay.ts';
 import type { SimFeed } from '../sim/sim-feed.ts';
-import type { Comparison } from '../sim/compare.ts';
+import type { Comparison, TrajectoryError } from '../sim/compare.ts';
 import type { PoseSource } from './pose-mediapipe.ts';
 import type { PackagedFrame } from './capture-package.ts';
 import type { Observation } from './types.ts';
@@ -22,7 +23,7 @@ let feed: Feed | null = null;
 let abort: AbortController | null = null;
 let manual = false;
 let disposeView: (() => void) | null = null;
-let current: { report: Report; front: FrontAnalysis; frontObs: Observation; frontImage: HTMLCanvasElement; side: SideAnalysis | null; sideObs: Observation | null; sideImage: HTMLCanvasElement | null; frames: PackagedFrame[]; sim: SimFeed | null; comparison: Comparison[] | null } | null = null;
+let current: { report: Report; front: FrontAnalysis; frontObs: Observation; frontImage: HTMLCanvasElement; side: SideAnalysis | null; sideObs: Observation | null; sideImage: HTMLCanvasElement | null; frames: PackagedFrame[]; sim: SimFeed | null; comparison: Comparison[] | null; samples: TurnSample[]; trajectory: TrajectoryError | null; mode: AroundMode | 'profile' } | null = null;
 
 try { const u = localStorage.getItem('fabric-body-scan:units'); if (u === 'in' || u === 'cm') units = u; } catch { /* storage unavailable */ }
 
@@ -92,13 +93,16 @@ function stepHeader(n: number, total: number, title: string, instruction: string
   $('step-instruction').textContent = instruction;
   $('capture-status').textContent = '';
   $('countdown').textContent = '';
-  $('capture-now').textContent = title === 'Turn' ? 'Finish turn' : 'Capture now';
+  $('capture-now').textContent = title === 'Turn' ? 'Finish turn' : title === 'Walk around' ? 'Finish walk' : 'Capture now';
   say(instruction);
 }
 
 type Still = { obs: Observation[]; image: HTMLCanvasElement };
 /** Waits until every check passes for a moment, counts down, then collects several frames. */
-async function captureStill(step: 'front' | 'profile', signal: AbortSignal, refShoulderSpan?: number): Promise<Still> {
+/** Analysis uses the frame leveled with the phone's gravity reading; the display keeps the raw frame. */
+const level = (o: Observation | null) => (o ? rectify(o, feed?.gravityUp?.()) : null);
+
+async function captureStill(step: 'front' | 'profile', signal: AbortSignal, refShoulderSpan?: number, handheld = false): Promise<Still> {
   const still = new Stillness();
   const started = performance.now();
   let okSince: number | null = null, spokenHint = 0;
@@ -108,7 +112,7 @@ async function captureStill(step: 'front' | 'profile', signal: AbortSignal, refS
   while (!signal.aborted) {
     const frame = await feed!.frame(step, performance.now() - started);
     if (!frame) continue;
-    const checks = evaluate(frame.obs, step, { still, tiltDeg: feed!.tilt(), refShoulderSpan });
+    const checks = evaluate(frame.obs, step, { still, tiltDeg: feed!.tilt(), refShoulderSpan, handheld });
     const ok = allOk(checks);
     const now = performance.now();
     if (manual && frame.obs) okSince ??= now - 3000;
@@ -125,7 +129,7 @@ async function captureStill(step: 'front' | 'profile', signal: AbortSignal, refS
     $('countdown').textContent = '';
     if (frame.obs && checks.find(c => c.id === 'person')?.ok) {
       if (!collected.length) { beep(); image = feed!.snapshot(); }
-      collected.push(frame.obs);
+      collected.push(level(frame.obs)!);
       $('capture-status').textContent = `Capturing ${collected.length}/6`;
       if (collected.length >= 6) { beep(1320, 180); return { obs: collected, image: image! }; }
     }
@@ -133,19 +137,18 @@ async function captureStill(step: 'front' | 'profile', signal: AbortSignal, refS
   throw new DOMException('cancelled', 'AbortError');
 }
 
-type Turn = { samples: TurnSample[]; profiles: { o: Observation; theta: number }[]; profileImage: HTMLCanvasElement | null; frames: PackagedFrame[] };
-function drawDial(bins: boolean[]) {
+type Turn = { samples: TurnSample[]; profiles: { o: Observation; theta: number; facing: number }[]; profileImage: HTMLCanvasElement | null; frames: PackagedFrame[] };
+/** Ring of 36 ten-degree sectors: which viewing angles around the subject have been captured (top = in front). */
+function drawDial(bins: boolean[], coveredDeg: number) {
   const g = $('dial-bins') as unknown as SVGGElement;
   const parts: string[] = [];
-  for (let quadrant = 0; quadrant < 4; quadrant++) for (let i = 0; i < BIN_COUNT; i++) {
-    const k = quadrant % 2 ? BIN_COUNT - 1 - i : i; // mirror so the ring reads as a full circle
-    const a0 = ((quadrant * 90 + i * 10) - 90) * DEG, a1 = a0 + 9 * DEG;
+  bins.forEach((on, i) => {
+    const a0 = (i * 10 - 90) * DEG, a1 = a0 + 9 * DEG;
     const p = (a: number, r: number) => `${(Math.cos(a) * r).toFixed(2)} ${(Math.sin(a) * r).toFixed(2)}`;
-    parts.push(`<path d="M ${p(a0, 30)} A 30 30 0 0 1 ${p(a1, 30)} L ${p(a1, 44)} A 44 44 0 0 0 ${p(a0, 44)} Z" fill="${bins[k] ? '#50dc96' : '#ffffff22'}"/>`);
-  }
+    parts.push(`<path d="M ${p(a0, 30)} A 30 30 0 0 1 ${p(a1, 30)} L ${p(a1, 44)} A 44 44 0 0 0 ${p(a0, 44)} Z" fill="${on ? '#50dc96' : '#ffffff22'}"/>`);
+  });
   g.innerHTML = parts.join('');
-  const pct = Math.round((bins.filter(Boolean).length / bins.length) * 100);
-  $('dial-label').textContent = `${pct}%`;
+  $('dial-label').textContent = `${Math.min(360, Math.round(coveredDeg))}°`;
 }
 const toBlob = (c: HTMLCanvasElement, type: string, q?: number) => new Promise<Blob>(r => c.toBlob(b => r(b!), type, q));
 function maskCanvas(o: Observation) {
@@ -157,45 +160,46 @@ function maskCanvas(o: Observation) {
   return c;
 }
 
-async function captureTurn(front: FrontAnalysis, signal: AbortSignal): Promise<Turn> {
+async function captureAround(front: FrontAnalysis, signal: AbortSignal, mode: AroundMode): Promise<Turn> {
   const samples: TurnSample[] = [], profiles: Turn['profiles'] = [], frames: PackagedFrame[] = [];
   let profileImage: HTMLCanvasElement | null = null;
   const started = performance.now();
   let lastFrameKept = 0, armsOutAt: number | null = null;
   manual = false;
   $('turn-dial').hidden = false;
-  drawDial(coverage([]));
+  drawDial(circleCoverage([]), 0);
   while (!signal.aborted) {
     const elapsed = performance.now() - started;
     const frame = await feed!.frame('turn', elapsed);
     if (!frame) continue;
-    const checks = evaluate(frame.obs, 'turn', { tiltDeg: feed!.tilt() });
+    const checks = evaluate(frame.obs, 'turn', { tiltDeg: feed!.tilt(), handheld: mode === 'orbit' });
     // Arms out is required: frames with the arms down are shown but never measured.
     const up = checks.find(c => c.id === 'arms')?.ok ?? false;
     if (up) armsOutAt ??= performance.now();
     paint(frame, checks, up);
-    const o = frame.obs;
+    const o = level(frame.obs);
     if (o && up && armsOutAt !== null && checks.find(c => c.id === 'frame')?.ok) {
-      const s = analyzeTurnFrame(o, front);
+      const s = analyzeTurnFrame(o, front, mode);
       if (s) {
         samples.push(s);
         if (foldAngle(s.theta) > 80 * DEG && up && profiles.length < 10 && (!profiles.length || o.timestamp - profiles[profiles.length - 1].o.timestamp > 80)) {
-          profiles.push({ o, theta: s.theta });
+          profiles.push({ o, theta: s.theta, facing: Math.cos(s.camera?.angle ?? 0) });
           profileImage ??= feed!.snapshot();
         }
         if (o.timestamp - lastFrameKept > 280 && frames.length < 60) {
           lastFrameKept = o.timestamp;
           const shot = feed!.snapshot();
-          frames.push({ jpeg: await toBlob(shot, 'image/jpeg', 0.85), mask: await toBlob(maskCanvas(o), 'image/png'), thetaDeg: s.theta / DEG, timestamp: o.timestamp, cmPerPx: s.cmPerPx, landmarks: o.landmarks, world: o.world });
+          frames.push({ jpeg: await toBlob(shot, 'image/jpeg', 0.85), mask: await toBlob(maskCanvas(frame.obs!), 'image/png'), thetaDeg: s.theta / DEG, timestamp: o.timestamp, cmPerPx: s.cmPerPx, landmarks: frame.obs!.landmarks, world: o.world, camera: s.camera, up: feed!.gravityUp?.() ?? null });
         }
       }
     }
-    const bins = coverage(samples);
-    drawDial(bins);
+    const { coveredDeg } = unwrapAngles(samples);
+    drawDial(circleCoverage(samples), coveredDeg);
     const turning = armsOutAt !== null ? performance.now() - armsOutAt : 0;
-    $('capture-status').textContent = armsOutAt === null || !up ? 'Hold both arms straight out to the sides.' : `Turning… ${samples.length} views`;
-    const done = feed!.turnDone ? feed!.turnDone() : bins.every(Boolean) && samples.length >= 40 && turning > 6000;
-    if (done || manual || (!feed!.turnDone && turning > 25000) || (armsOutAt === null && elapsed > 15000)) {
+    $('capture-status').textContent = armsOutAt === null || !up ? 'Hold both arms straight out to the sides.' : mode === 'orbit' ? `Walking around… ${Math.round(coveredDeg)}° of 360°` : `Turning… ${samples.length} views`;
+    const done = feed!.turnDone ? feed!.turnDone() : coveredDeg >= 345 && samples.length >= 30;
+    const timeout = mode === 'orbit' ? 90000 : 25000;
+    if (done || manual || (!feed!.turnDone && turning > timeout) || (armsOutAt === null && elapsed > 15000)) {
       beep(1320, 180);
       $('turn-dial').hidden = true;
       return { samples, profiles, profileImage, frames };
@@ -208,7 +212,9 @@ async function runCameraFlow(kind: 'camera' | 'sim') {
   let h = kind === 'sim' ? 0 : heightCm();
   if (kind === 'camera' && !h) { setupError('Enter a height between 100 and 230 cm (39–90 in).'); $('height').focus(); return; }
   setupError('');
-  const withTurn = $<HTMLInputElement>('turn').checked;
+  const scenario = params.get('scenario') === 'turn' ? 'turn' : 'orbit';
+  const mode = (kind === 'sim' ? scenario : (document.querySelector('input[name="mode"]:checked') as HTMLInputElement).value) as AroundMode | 'profile';
+  const handheld = mode === 'orbit';
   abort = new AbortController();
   const { signal } = abort;
   show('capture');
@@ -218,11 +224,11 @@ async function runCameraFlow(kind: 'camera' | 'sim') {
       const detector = params.get('detector') === 'oracle' ? 'oracle' : 'mediapipe';
       $('capture-status').textContent = 'Loading the simulated body…';
       const { SimFeed } = await import('../sim/sim-feed.ts');
-      sim = await SimFeed.create({ detector, pose: detector === 'mediapipe' ? await loadPose() : undefined, turnStepDeg: Number(params.get('turnStep')) || 4, girthScale: Number(params.get('girth')) || 1 });
+      sim = await SimFeed.create({ detector, scenario, pose: detector === 'mediapipe' ? await loadPose() : undefined, turnStepDeg: Number(params.get('turnStep')) || 4, girthScale: Number(params.get('girth')) || 1 });
       feed = sim;
       (window as unknown as { __sim: SimFeed }).__sim = sim;
       h = sim.heightCm;
-      showInset(sim.inset, detector);
+      showInset(sim.inset, detector, scenario);
     } else {
       await Tilt.request();
       const facing = (document.querySelector('input[name="facing"]:checked') as HTMLInputElement).value as 'environment' | 'user';
@@ -230,18 +236,21 @@ async function runCameraFlow(kind: 'camera' | 'sim') {
       feed = await CameraFeed.open($<HTMLVideoElement>('video'), p, facing);
     }
     const total = 2;
-    stepHeader(1, total, 'Front', 'Face the camera. Hold both arms straight out to the sides at shoulder height, palms down, feet hip-width apart.');
-    const f = await captureStill('front', signal);
+    stepHeader(1, total, 'Front', handheld
+      ? 'Helper: stand about two and a half metres in front, phone upright at chest height, head to feet in frame. Subject: face the phone, arms straight out to the sides, palms down, feet apart.'
+      : 'Face the camera. Hold both arms straight out to the sides at shoulder height, palms down, feet hip-width apart.');
+    const f = await captureStill('front', signal, undefined, handheld);
     const front = combineAnalyses(f.obs.map(o => analyzeFront(o, { kind: 'height', heightCm: h! })).filter((a): a is FrontAnalysis => !!a));
     if (!front) throw new Error('Could not find a full body outline in the front frames. Check lighting and framing, then try again.');
     requireTorso(front);
     let side: SideAnalysis | null = null, sideObs: Observation | null = null, sideImage: HTMLCanvasElement | null = null;
     let samples: TurnSample[] = [], frames: PackagedFrame[] = [];
-    if (withTurn) {
-      stepHeader(2, total, 'Turn', 'Keep your arms straight out and turn slowly on the spot. One full circle, about ten seconds.');
-      const t = await captureTurn(front, signal);
+    if (mode !== 'profile') {
+      if (mode === 'orbit') stepHeader(2, total, 'Walk around', 'Helper: walk slowly in a full circle around them, about two and a half metres away, keeping head to feet in frame. Subject: stay still with your arms out.');
+      else stepHeader(2, total, 'Turn', 'Keep your arms straight out and turn slowly on the spot. One full circle, about ten seconds.');
+      const t = await captureAround(front, signal, mode);
       samples = t.samples; frames = t.frames;
-      side = combineAnalyses(t.profiles.map(p => analyzeSide(p.o, front, { kind: 'fixed', cmPerPx: front.scale.cmPerPx, floorY: front.scale.floorY }, p.theta)).filter((a): a is SideAnalysis => !!a));
+      side = combineAnalyses(t.profiles.map(p => analyzeSide(p.o, front, mode === 'orbit' ? { kind: 'height', heightCm: h!, facing: p.facing } : { kind: 'fixed', cmPerPx: front.scale.cmPerPx, floorY: front.scale.floorY }, p.theta)).filter((a): a is SideAnalysis => !!a));
       sideObs = t.profiles[0]?.o ?? null; sideImage = t.profileImage;
     } else {
       stepHeader(2, total, 'Profile', 'Keep your arms straight out and turn ninety degrees to your left.');
@@ -253,9 +262,15 @@ async function runCameraFlow(kind: 'camera' | 'sim') {
     const report = buildReport(front, side, samples);
     say('Scan complete.');
     let comparison: Comparison[] | null = null;
-    if (sim) { const { compareToMesh } = await import('../sim/compare.ts'); const t = sim.truth(); comparison = compareToMesh(report, front, t.body, t.cam); }
-    current = { report, front, frontObs: f.obs[0], frontImage: f.image, side, sideObs, sideImage, frames, sim, comparison };
-    (window as unknown as { __scan: unknown }).__scan = { report, comparison };
+    let trajectory: TrajectoryError | null = null;
+    if (sim) {
+      const { compareToMesh, trajectoryError } = await import('../sim/compare.ts');
+      const t = sim.truth(f.obs[0].timestamp);
+      comparison = compareToMesh(report, front, t.body, t.cam);
+      if (mode !== 'profile') trajectory = trajectoryError(samples, samples.map(s => sim!.cameras.get(s.timestamp)?.position ?? [NaN, NaN, NaN]));
+    }
+    current = { report, front, frontObs: f.obs[0], frontImage: f.image, side, sideObs, sideImage, frames, sim, comparison, samples, trajectory, mode };
+    (window as unknown as { __scan: unknown }).__scan = { report, comparison, trajectory };
   } catch (error) {
     feed?.stop();
     if ((error as Error).name === 'AbortError') { show('setup'); return; }
@@ -304,7 +319,7 @@ async function measurePhotos() {
         side = source ? analyzeSide(sideObs, front, source, yawOf(sideObs, front)) : null;
       }
     }
-    current = { report: buildReport(front, side), front, frontObs, frontImage, side, sideObs, sideImage, frames: [], sim: null, comparison: null };
+    current = { report: buildReport(front, side), front, frontObs, frontImage, side, sideObs, sideImage, frames: [], sim: null, comparison: null, samples: [], trajectory: null, mode: 'profile' };
   } catch (error) {
     setupError((error as Error).message);
     return;
@@ -321,12 +336,12 @@ function finish() {
   renderResults();
 }
 
-function showInset(inset: HTMLCanvasElement, detector: string) {
+function showInset(inset: HTMLCanvasElement, detector: string, scenario: string) {
   inset.className = 'sim-inset';
   inset.setAttribute('aria-label', 'Simulation: the phone and the turning body seen from outside');
   const badge = document.createElement('p');
   badge.className = 'sim-badge';
-  badge.textContent = `Simulation · CC0 MakeHuman mesh · ${detector === 'oracle' ? 'exact mask and joints' : 'MediaPipe on rendered frames'}`;
+  badge.textContent = `Simulation · ${scenario === 'orbit' ? 'helper walks around in a room' : 'subject turns'} · ${detector === 'oracle' ? 'exact mask and joints' : 'MediaPipe on rendered frames'}`;
   $('stage').append(inset, badge);
 }
 
@@ -365,10 +380,35 @@ function renderResults() {
   $('side-figure').hidden = !(current.side && current.sideObs);
   if (current.side && current.sideObs) drawAnalysis($<HTMLCanvasElement>('side-view'), current.sideImage ?? paintMask(current.sideObs), current.side, current.sideObs);
   $('download-package').hidden = !current.frames.length;
+  drawPath();
   disposeView?.();
   disposeView = null;
   import('./view3d.ts').then(({ showBody }) => { if (current) disposeView = showBody($('view3d'), current.report, current.front, current.sim?.ghost()); });
   document.body.dataset.measured = String(report.measurements.length);
+}
+
+/** Top view of where the camera was, estimated from each frame (and the true path in simulation). */
+function drawPath() {
+  const fig = $('path-figure'), svg = $('path-plot');
+  const est = cameraPath(current!.samples).map(c => ({ s: c, c }));
+  fig.hidden = est.length < 5;
+  if (fig.hidden) return;
+  // World x (subject's left) and z (in front of them) seen from above with the subject facing up the screen:
+  // their left is on the screen's left, so screen = (−x, −z).
+  const pt = (angle: number, d: number) => [d * Math.sin(angle), d * Math.cos(angle)];
+  const scr = (p: number[]) => [-p[0], -p[1]];
+  const line = (pts: number[][]) => pts.map((p, i) => `${i ? 'L' : 'M'}${scr(p)[0].toFixed(1)} ${scr(p)[1].toFixed(1)}`).join(' ');
+  const parts = ['<circle r="300" fill="none" stroke="#ffffff14"/>', '<circle r="200" fill="none" stroke="#ffffff10"/>', '<circle r="100" fill="none" stroke="#ffffff10"/>',
+    '<ellipse rx="22" ry="14" fill="#9fb4d0"/><path d="M0 -14 L0 -40" stroke="#9fb4d0" stroke-width="4"/>'];
+  if (current!.sim) {
+    const truth = est.map(e => current!.sim!.cameras.get(e.s.timestamp)?.position).filter((p): p is [number, number, number] => !!p).map(p => [p[0], p[2]]);
+    parts.push(`<path d="${line(truth)}" fill="none" stroke="#ffffffaa" stroke-width="3" stroke-dasharray="10 8"/>`);
+  }
+  parts.push(`<path d="${line(est.map(e => pt(e.c.angle, e.c.distanceCm)))}" fill="none" stroke="#50dc96" stroke-width="4"/>`);
+  for (const e of est) { const [x, y] = scr(pt(e.c.angle, e.c.distanceCm)); parts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5" fill="#50dc96"/>`); }
+  svg.innerHTML = parts.join('');
+  const t = current!.trajectory;
+  $('path-caption').textContent = `Camera path from above (subject faces up; rings every 1 m). Green: estimated from each frame` + (t ? `; dashed: true path. Error ${t.ateCm} cm RMS (angle ${t.angleErrDeg}°, height ${t.heightErrCm} cm, distance ${t.distanceErrCm} cm).` : '.');
 }
 
 function download(name: string, blob: Blob) {

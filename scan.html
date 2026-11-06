@@ -18,7 +18,7 @@
       <section id="setup" class="screen" aria-labelledby="setup-title">
         <p class="eyebrow">On-device · nothing is uploaded</p>
         <h1 id="setup-title">Measure a body<br /><span>with a phone camera.</span></h1>
-        <p class="lede">Prop the phone upright at waist height and step back 2.5–3 m. Hold both arms straight out to the sides for the whole scan: one front pose, then one slow turn on the spot. Your height sets the metric scale.</p>
+        <p class="lede">Stand with both arms straight out to the sides for the whole scan. A helper takes one front view, then walks a slow circle around you about 2.5 m away, keeping you head to feet in frame. No helper? Prop the phone and turn on the spot. Your height sets the metric scale; the phone's motion sensor levels every frame.</p>
         <form id="setup-form" class="card" novalidate>
           <div class="field">
             <label for="height">Height</label>
@@ -33,7 +33,12 @@
             <label class="radio"><input type="radio" name="facing" value="environment" checked /> Rear (someone else holds or props the phone)</label>
             <label class="radio"><input type="radio" name="facing" value="user" /> Front / selfie (scan yourself; phone propped)</label>
           </fieldset>
-          <label class="toggle"><input type="checkbox" id="turn" checked /> 360° turn — most accurate chest, waist and hip</label>
+          <fieldset class="field">
+            <legend>How will you scan?</legend>
+            <label class="radio"><input type="radio" name="mode" value="orbit" checked /> A helper walks around you with the phone (recommended)</label>
+            <label class="radio"><input type="radio" name="mode" value="turn" /> Prop the phone and turn on the spot</label>
+            <label class="radio"><input type="radio" name="mode" value="profile" /> Quick: front and side only</label>
+          </fieldset>
           <label class="toggle"><input type="checkbox" id="voice" checked /> Spoken prompts</label>
           <p class="error" id="setup-error" role="alert" hidden></p>
           <div class="actions">
@@ -89,6 +94,7 @@
           <div class="card views">
             <div class="view3d" id="view3d" aria-label="3D cross-sections of the measured body"></div>
             <div class="thumbs"><figure><canvas id="front-view"></canvas><figcaption>Front</figcaption></figure><figure id="side-figure"><canvas id="side-view"></canvas><figcaption>Profile</figcaption></figure></div>
+            <figure id="path-figure" hidden><svg id="path-plot" viewBox="-360 -360 720 720" role="img" aria-label="Top view: the subject in the centre and the camera path around them"></svg><figcaption id="path-caption"></figcaption></figure>
           </div>
         </div>
         <div class="actions export">

@@ -14,6 +14,21 @@ Goal: a page that runs in a phone browser, uses the camera, and returns body mea
 
 **Metric scale needs an external anchor.** Monocular structure-from-motion and feed-forward point-map models such as MASt3R produce geometry with an unknown scale. Metric results come from depth sensors or added metric priors. For example, GTLR-GS supervises Gaussian splats with LiDAR depth and down-weights its noise at depth edges ([arXiv 2603.23192](https://arxiv.org/abs/2603.23192)). In a browser, LiDAR and ARKit are unavailable. WebXR depth sensing is a separate module with uneven device support; Android XR Chrome lists it, and Safari has no WebXR, so it must be feature-detected ([Android XR web docs](https://developer.android.com/develop/xr/web)). The practical anchors are a **known height** (used here) or a reference object of known size.
 
+**Metric camera motion from a phone video.** NVIDIA's [MetricTrail](https://huggingface.co/nvidia/MetricTrail) (model card dated 11/05/2026) estimates camera trajectories and per-frame metric depth from long monocular RGB sequences. It combines a frozen single-image metric-depth model (MoGe-2), DPVO sparse patch correspondences with a frozen DINOv3 encoder, and local bundle adjustment, with supplied or self-estimated intrinsics. Its reported results include:
+
+- 7Scenes (indoor): 6.3–6.7 cm trajectory error.
+- TUM RGB-D: 4.4–8.4 cm.
+- Wild-SLAM MoCap: 1.65–2.70 cm.
+
+Its limits for this app:
+
+- It needs CUDA, and the checkpoint is "released separately".
+- Its licence limits it to non-commercial research or evaluation.
+- It does not handle moving objects, and its scores on dynamic scenes trail leading methods.
+- It exports trajectories and depth, not meshes.
+
+The takeaway for body scanning: **metric scale can be re-anchored every frame from a metric prior while the camera moves**. This app's prior is cheaper and stronger for its narrow task: the subject's known height plus the phone's gravity vector.
+
 ## Design decisions
 
 | Decision | Why |
@@ -22,6 +37,7 @@ Goal: a page that runs in a phone browser, uses the camera, and returns body mea
 | Metric scale from the user's height | It is the anchor used by commercial apps and BodyM. It needs no extra hardware and works on iOS Safari. The mask's head-to-heel span equals the stated height, which gives cm/px at the body plane. |
 | Levels from landmarks, widths from the mask | Landmarks are good at *where* a measurement goes but poor at *how wide* the body is. The silhouette is accurate there. Sub-pixel edges come from the soft mask. |
 | Heights, not pixel rows, link the views | Each view keeps its own scale, so a profile photo taken from a different distance still lines up with the front. |
+| **A helper walks around (MetricTrail-style moving camera)** | The subject stands still and a helper walks a circle with the phone. Each frame is leveled from the gravity sensor, which removes pitch and roll by a pure rotation about the lens. It then gets its own metric scale and floor from the subject's height. That is the per-frame metric anchor MetricTrail gets from a depth model. From the same quantities each frame also yields where the camera was: angle (from the signed shoulder and hip spans, with the nose's offset near front and back), distance (scale × an assumed focal length) and height (floor row relative to the horizon). The heel-parallax correction follows the viewing angle, because the heels are behind the body from the front, beside it from the side, and in front of it from behind. In simulation the camera path is recovered to about 0.5° and 1 cm in height with exact masks, and about 5° and 2 cm with MediaPipe. |
 | **Arms out for the whole scan** | Held straight out at shoulder height, the arms never cross the chest, waist or hip rows from any angle. In an A-pose or with arms down, they merge with the torso outline at oblique angles. The app requires the pose and does not measure frames without it. A frame is dropped only if an arm actually merges with the torso outline at that row. An arm hidden behind or in front of the torso does not count. |
 | **Turn-in-place girths via Cauchy's formula** | A tape follows the convex outline. The perimeter of a convex cross-section is the integral of its caliper width over half a turn, P = ∫₀^π w(θ) dθ. The phone stays fixed while the subject turns, and each frame gives w(θ). Body symmetry folds θ into 0–90°. The angle comes from the *horizontal* 2D shoulder and hip spans (|cos θ|). Perspective tilts the vertical component as the body turns, and MediaPipe's monocular depth is noisy. This makes no ellipse assumption: on a rounded-rectangle section the two-view ellipse is more than 3% off, while the turntable estimate is within 0.5% (see the unit tests). |
 | Two-view ellipse as the fallback | Front width plus profile depth with Ramanujan's perimeter. It is exact for elliptical sections. |
@@ -31,6 +47,14 @@ Goal: a page that runs in a phone browser, uses the camera, and returns body mea
 | Splat export instead of in-browser splatting | The turn frames, person masks, landmarks and scale are exported as a zip. Offline COLMAP/GLOMAP or MASt3R/VGGT, then gsplat or nerfstudio, can reconstruct them. Height or cm/px restores metric scale. |
 
 ## Accuracy, honestly
+
+**Simulation in a room, with a helper walking around.** The latest results, including the furnished-room walk-around with real MediaPipe, are in the README and in `test-results/body-scan-sim/report.md` after `npm run test:sim`. In the walk-around with MediaPipe:
+
+- Torso girths: +1% to +2%.
+- Legs: −0.4% to +5%.
+- Neck (front-only estimate): +12% to +14%, the weakest.
+
+The chest varies by a few percent between runs. With arms out, this body's chest girth changes about 1.7 cm per centimetre of height just below the armpits, so each walk-around frame places torso levels between its own shoulder- and hip-joint landmarks rather than using its floor line.
 
 **Simulation with a 3D body.** The CC0 MakeHuman base mesh is posed with its CC0 skeleton and weights (arms out). A pinhole phone camera renders it, and the app scans it. Every measurement is scored against the posed mesh, sliced where the app measured and taken as the tape (convex hull) perimeter. The simulation uncovered real perspective problems that the earlier orthographic synthetic body could not:
 

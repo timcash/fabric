@@ -29,7 +29,7 @@ export type FrontAnalysis = {
   sites: Partial<Record<Site, SiteChord>>;
   lengths: Partial<Record<LengthId, LengthValue>>;
   /** Frontal reference spans (px) and the hip-joint height used to follow the subject in later frames. */
-  ref: { shoulderSpanPx: number; hipSpanPx: number; hipHeightCm: number; hipYPx: number; bodyPx: number; legJointsCm: { hip: number; knee: number; ankle: number } };
+  ref: { shoulderSpanPx: number; hipSpanPx: number; hipHeightCm: number; hipYPx: number; bodyPx: number; legJointsCm: { hip: number; knee: number; ankle: number }; shoulderCm: number };
   warnings: string[];
 };
 
@@ -46,7 +46,8 @@ const toY = (s: Scale, h: number) => s.floorY - h / s.cmPerPx;
 
 /** 'phone': pinhole camera, upright, with a typical main-camera field of view. 'orthographic': no perspective. */
 export type Lens = 'phone' | 'orthographic';
-export type ScaleSource = { kind: 'height'; heightCm: number; lens?: Lens } | { kind: 'fixed'; cmPerPx: number; floorY?: number };
+/** `facing`: cos of the viewing angle (1 = from the front, −1 = from behind), which decides where the heels sit. */
+export type ScaleSource = { kind: 'height'; heightCm: number; lens?: Lens; facing?: number } | { kind: 'fixed'; cmPerPx: number; floorY?: number };
 
 /** Typical phone main-camera field of view along the image's long side (≈26 mm equivalent). */
 export const PHONE_FOV_DEG = 68;
@@ -80,7 +81,7 @@ export function measureScale(o: Observation, source: ScaleSource): Scale | null 
     // Heels sit behind the body's plane, so with the camera above the floor they image slightly higher than the
     // floor under the body. Shift by that parallax (upright pinhole camera, typical field of view).
     const s = scaleFor(floorY), f = Math.max(o.width, o.height) / 2 / Math.tan((PHONE_FOV_DEG * Math.PI) / 360);
-    const D = f * s, camHeight = (floorY - o.height / 2) * s, behind = HEEL_BEHIND * (floorY - ext.top) * s;
+    const D = f * s, camHeight = (floorY - o.height / 2) * s, behind = HEEL_BEHIND * (source.kind === 'height' ? source.facing ?? 1 : 1) * (floorY - ext.top) * s;
     if (camHeight > 0) floorY += (f * camHeight * behind) / (D * (D + behind));
   }
   return { cmPerPx: scaleFor(floorY), floorY, topY: ext.top };
@@ -138,7 +139,7 @@ export function analyzeFront(o: Observation, source: ScaleSource): FrontAnalysis
   // Mid-neck, below the larynx: 40% of the way up from the shoulder line to the mouth. The narrowest row is
   // right under the jaw, where a tape would catch the chin.
   const neckY = sh.y - 0.4 * neckSpan;
-  sites.neck = site(scale, [scanRows(neckY - 0.05 * neckSpan, neckY + 0.05 * neckSpan, 'median', torsoAt)]);
+  sites.neck = site(scale, [scanRows(neckY - 0.12 * neckSpan, neckY + 0.12 * neckSpan, 'median', torsoAt)]);
   const chestY = sh.y + 0.27 * T;
   sites.chest = site(scale, [scanRows(chestY - 0.02 * T, chestY + 0.02 * T, 'median', torsoAt)]);
   sites.waist = site(scale, [scanRows(sh.y + 0.55 * T, sh.y + 0.85 * T, 'min', torsoAt)]);
@@ -204,7 +205,7 @@ export function analyzeFront(o: Observation, source: ScaleSource): FrontAnalysis
   return {
     view: 'front', scale, heightCm, sites, lengths, warnings,
     ref: { shoulderSpanPx: Math.abs(lS.x - rS.x), hipSpanPx: Math.abs(lH.x - rH.x), hipHeightCm: toCm(scale, hp.y), hipYPx: hp.y, bodyPx: scale.floorY - scale.topY,
-      legJointsCm: { hip: toCm(scale, hp.y), knee: toCm(scale, (P(o, LM.leftKnee).y + P(o, LM.rightKnee).y) / 2), ankle: toCm(scale, (P(o, LM.leftAnkle).y + P(o, LM.rightAnkle).y) / 2) } },
+      legJointsCm: { hip: toCm(scale, hp.y), knee: toCm(scale, (P(o, LM.leftKnee).y + P(o, LM.rightKnee).y) / 2), ankle: toCm(scale, (P(o, LM.leftAnkle).y + P(o, LM.rightAnkle).y) / 2) }, shoulderCm: toCm(scale, sh.y) },
   };
 }
 

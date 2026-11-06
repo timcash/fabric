@@ -3,18 +3,23 @@
  * through the simulated camera onto the body's plane, so the truth is the tape girth exactly where the app
  * measured. Level errors (where the app thought it measured) are reported separately.
  */
-import type { Camera } from './camera.ts';
+import { pixelRay, type Camera } from './camera.ts';
 import { bodyCenter, jointAt, type PosedBody, type Vec3 } from './makehuman.ts';
 import { crotchHeight, limbSection, sectionAt, span } from './truth.ts';
 import type { FrontAnalysis } from '../scan/measure.ts';
 import type { Report } from '../scan/report.ts';
+import { cameraPath, type TurnSample } from '../scan/turntable.ts';
 
 export type Comparison = { id: string; label: string; method: string; measuredCm: number; truthCm: number; errorCm: number; errorPct: number; levelErrorCm?: number };
 
-/** Body-frame point (cm) seen at image (x, y) on the plane through the body's centre facing the camera (yaw 0). */
-function backProject(cam: Camera, center: Vec3, x: number, y: number, depthOffset = 0): Vec3 {
-  const D = cam.position[2] - depthOffset;
-  return [((x - cam.cx) * D) / cam.f + cam.position[0] + center[0], cam.position[1] - ((y - cam.cy) * D) / cam.f, center[2] + depthOffset];
+/**
+ * Body-frame point (cm) seen at image (x, y) on the body's frontal plane through its centre. The camera is the
+ * (leveled) front camera in the frame where the body centre is the origin.
+ */
+function backProject(cam: Camera, center: Vec3, x: number, y: number): Vec3 {
+  const { origin, dir } = pixelRay(cam, x, y);
+  const t = -origin[2] / dir[2];
+  return [origin[0] + t * dir[0] + center[0], origin[1] + t * dir[1], center[2]];
 }
 
 export function compareToMesh(report: Report, front: FrontAnalysis, body: PosedBody, cam: Camera): Comparison[] {
@@ -73,4 +78,27 @@ export function comparisonTable(rows: readonly Comparison[]): string {
   const lines = ['| Measurement | Method | Measured | Mesh truth | Error |', '| --- | --- | ---: | ---: | ---: |'];
   for (const r of rows) lines.push(`| ${r.label} | ${r.method} | ${r.measuredCm.toFixed(1)} cm | ${r.truthCm.toFixed(1)} cm | ${r.errorCm >= 0 ? '+' : ''}${r.errorCm.toFixed(1)} cm (${r.errorPct >= 0 ? '+' : ''}${r.errorPct.toFixed(1)}%) |`);
   return lines.join('\n');
+}
+
+export type TrajectoryError = { frames: number; ateCm: number; distanceErrCm: number; heightErrCm: number; angleErrDeg: number };
+
+/**
+ * Camera-path error, in the spirit of visual-odometry benchmarks: the estimated camera positions (angle, distance
+ * and height relative to the subject) against the true ones. No alignment is applied: the subject fixes the frame
+ * and the subject's height fixes the scale.
+ */
+export function trajectoryError(samples: readonly TurnSample[], truths: readonly Vec3[]): TrajectoryError {
+  let sq = 0, dd = 0, dh = 0, da = 0, n = 0;
+  const path = cameraPath(samples), byTime = new Map(path.map(c => [c.timestamp, c]));
+  samples.forEach((s, i) => {
+    const c = byTime.get(s.timestamp), t = truths[i];
+    if (!c || !t) return;
+    const est: Vec3 = [c.distanceCm * Math.sin(c.angle), c.heightCm, c.distanceCm * Math.cos(c.angle)];
+    sq += (est[0] - t[0]) ** 2 + (est[1] - t[1]) ** 2 + (est[2] - t[2]) ** 2;
+    dd += Math.abs(c.distanceCm - Math.hypot(t[0], t[2])); dh += Math.abs(c.heightCm - t[1]);
+    const ta = Math.atan2(t[0], t[2]), e = c.angle - ta;
+    da += Math.abs(Math.atan2(Math.sin(e), Math.cos(e))); n++;
+  });
+  const r = (v: number) => Math.round(v * 10) / 10;
+  return { frames: n, ateCm: r(Math.sqrt(sq / Math.max(1, n))), distanceErrCm: r(dd / Math.max(1, n)), heightErrCm: r(dh / Math.max(1, n)), angleErrDeg: r((da / Math.max(1, n)) * 180 / Math.PI) };
 }

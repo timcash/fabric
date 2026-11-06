@@ -32,7 +32,8 @@ export class Stillness {
   reset() { this.history = []; }
 }
 
-export function evaluate(o: Observation | null, pose: Pose, opts: { still?: Stillness; tiltDeg?: number | null; refShoulderSpan?: number } = {}): Check[] {
+/** `handheld`: a helper holds the phone, so frames are leveled from gravity and some image shake is expected. */
+export function evaluate(o: Observation | null, pose: Pose, opts: { still?: Stillness; tiltDeg?: number | null; refShoulderSpan?: number; handheld?: boolean } = {}): Check[] {
   const checks: Check[] = [];
   const add = (id: CheckId, label: string, ok: boolean, hint: string) => checks.push({ id, label, ok, hint });
   const person = !!o && KEY.every(i => (o.landmarks[i]?.visibility ?? 1) >= 0.5);
@@ -60,9 +61,10 @@ export function evaluate(o: Observation | null, pose: Pose, opts: { still?: Stil
   if (pose !== 'front') add('arms', ARMS_LABEL, armsOut(o, T), ARMS_HINT);
   if (opts.still && pose !== 'turn') {
     opts.still.push(o);
-    add('still', 'Holding still', opts.still.motion(bodyPx) < 0.012, 'Hold still for a moment.');
+    add('still', 'Holding still', opts.still.motion(bodyPx) < (opts.handheld ? 0.03 : 0.012), opts.handheld ? 'Both of you: hold still for a moment.' : 'Hold still for a moment.');
   }
-  if (opts.tiltDeg !== undefined && opts.tiltDeg !== null) add('level', 'Phone upright', Math.abs(opts.tiltDeg) < 4, `Stand the phone upright (tilted ${opts.tiltDeg.toFixed(0)}°). Tilt distorts lengths.`);
+  // Frames are leveled from the gravity sensor, so a modest tilt is fine; a large one crops and stretches the view.
+  if (opts.tiltDeg !== undefined && opts.tiltDeg !== null) add('level', 'Phone roughly upright', Math.abs(opts.tiltDeg) < 15, `Hold the phone more upright (tilted ${opts.tiltDeg.toFixed(0)}°).`);
   return checks;
 }
 

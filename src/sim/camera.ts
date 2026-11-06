@@ -1,21 +1,59 @@
 /**
- * A pinhole phone camera (portrait, upright, looking along −z) and a software rasterizer that produces an
- * anti-aliased person mask from a triangle mesh. Perspective is real: near parts look larger, the floor
- * converges, and feet pointing at the camera reach lower in the image than the heels.
+ * A pinhole phone camera (portrait) and a software rasterizer that produces an anti-aliased person mask from a
+ * triangle mesh. Perspective is real: near parts look larger, the floor converges, and feet pointing at the camera
+ * reach lower in the image than the heels. The camera may be anywhere and tilted (a handheld phone): `rotation` is
+ * world-from-camera (row-major 3×3; camera x right, y up, looking along −z), identity = upright, looking along −z.
  */
 import type { Vec3 } from './makehuman.ts';
 
-export type Camera = { width: number; height: number; f: number; cx: number; cy: number; position: Vec3 };
+export type Camera = { width: number; height: number; f: number; cx: number; cy: number; position: Vec3; rotation?: number[] };
 
 export function phoneCamera(o: { width?: number; height?: number; vfovDeg?: number; distanceCm?: number; heightCm?: number } = {}): Camera {
   const { width = 720, height = 1280, vfovDeg = 66, distanceCm = 280, heightCm = 100 } = o;
   return { width, height, f: height / 2 / Math.tan((vfovDeg * Math.PI) / 360), cx: width / 2, cy: height / 2, position: [0, heightCm, distanceCm] };
 }
 
+const DEG = Math.PI / 180;
+export const rotY = (t: number) => [Math.cos(t), 0, Math.sin(t), 0, 1, 0, -Math.sin(t), 0, Math.cos(t)];
+export const rotX = (t: number) => [1, 0, 0, 0, Math.cos(t), -Math.sin(t), 0, Math.sin(t), Math.cos(t)];
+export const rotZ = (t: number) => [Math.cos(t), -Math.sin(t), 0, Math.sin(t), Math.cos(t), 0, 0, 0, 1];
+export function mul3(a: number[], b: number[]): number[] {
+  const o = Array<number>(9).fill(0);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) o[r * 3 + c] += a[r * 3 + k] * b[k * 3 + c];
+  return o;
+}
+export const apply3 = (m: number[], v: Vec3): Vec3 => [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]];
+export const transpose3 = (m: number[]) => [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
+
+export type OrbitPose = { phiDeg: number; radiusCm: number; heightCm: number; aimDeg?: number; pitchDeg?: number; rollDeg?: number };
+/**
+ * A handheld camera on a circle around the subject (origin): φ = 0 in front, φ = 90° on the subject's left.
+ * Rotation = Ry(φ + aim) · Rx(pitch) · Rz(roll), the same as three.js Euler order 'YXZ'.
+ */
+export function orbitCamera(pose: OrbitPose, o: { width?: number; height?: number; vfovDeg?: number } = {}): Camera {
+  const base = phoneCamera({ ...o, distanceCm: 0, heightCm: 0 });
+  const phi = pose.phiDeg * DEG;
+  return {
+    ...base,
+    position: [pose.radiusCm * Math.sin(phi), pose.heightCm, pose.radiusCm * Math.cos(phi)],
+    rotation: mul3(mul3(rotY(phi + (pose.aimDeg ?? 0) * DEG), rotX((pose.pitchDeg ?? 0) * DEG)), rotZ((pose.rollDeg ?? 0) * DEG)),
+  };
+}
+/** World "up" in camera coordinates: what a phone's gravity sensor reports (negated gravity). */
+export const cameraUp = (cam: Camera): Vec3 => (cam.rotation ? apply3(transpose3(cam.rotation), [0, 1, 0]) : [0, 1, 0]);
+
 /** Image coordinates (pixel edges at integers) and depth of a world point. */
 export function project(cam: Camera, p: Vec3): { x: number; y: number; depth: number } {
-  const depth = cam.position[2] - p[2];
-  return { x: cam.cx + (cam.f * (p[0] - cam.position[0])) / depth, y: cam.cy - (cam.f * (p[1] - cam.position[1])) / depth, depth };
+  const d: Vec3 = [p[0] - cam.position[0], p[1] - cam.position[1], p[2] - cam.position[2]];
+  const c = cam.rotation ? apply3(transpose3(cam.rotation), d) : d;
+  const depth = -c[2];
+  return { x: cam.cx + (cam.f * c[0]) / depth, y: cam.cy - (cam.f * c[1]) / depth, depth };
+}
+
+/** World ray (origin, direction) through image point (x, y). */
+export function pixelRay(cam: Camera, x: number, y: number): { origin: Vec3; dir: Vec3 } {
+  const c: Vec3 = [(x - cam.cx) / cam.f, -(y - cam.cy) / cam.f, -1];
+  return { origin: cam.position, dir: cam.rotation ? apply3(cam.rotation, c) : c };
 }
 
 /** Places the body: turns it by `yawDeg` about the vertical axis through `center`, which moves to the origin. */

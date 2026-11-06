@@ -16,23 +16,43 @@ export interface Feed {
   /** Copy of the last frame's image at full resolution. */
   snapshot(): HTMLCanvasElement;
   tilt(): number | null;
+  /** World "up" in camera coordinates from the motion sensor (for leveling a handheld frame), if known. */
+  gravityUp?(): [number, number, number] | null;
   stop(): void;
   /** Simulated feeds know when the body has turned a full circle. */
   turnDone?(): boolean;
 }
 
+/**
+ * The phone's gravity reading. accelerationIncludingGravity at rest points up; it is low-pass filtered against
+ * hand motion. Browsers disagree on the sign convention (iOS reports it negated), so the sign is fixed by assuming
+ * the phone is held roughly upright in portrait (device y is the larger component and points up).
+ * Device axes are x right, y up, z out of the screen, which are the back camera's axes.
+ */
 export class Tilt {
-  private beta: number | null = null;
-  private handler = (e: DeviceOrientationEvent) => { if (e.beta !== null) this.beta = e.beta; };
+  private g: [number, number, number] | null = null;
+  private handler = (e: DeviceMotionEvent) => {
+    const a = e.accelerationIncludingGravity;
+    if (a?.x == null || a.y == null || a.z == null) return;
+    const s = a.y < 0 ? -1 : 1, v: [number, number, number] = [a.x * s, a.y * s, a.z * s];
+    this.g = this.g ? [this.g[0] * 0.8 + v[0] * 0.2, this.g[1] * 0.8 + v[1] * 0.2, this.g[2] * 0.8 + v[2] * 0.2] : v;
+  };
   /** iOS asks for motion permission; this must run inside a user gesture. */
   static async request(): Promise<void> {
-    const D = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> } | undefined;
+    const D = window.DeviceMotionEvent as unknown as { requestPermission?: () => Promise<string> } | undefined;
     if (D?.requestPermission) { try { await D.requestPermission(); } catch { /* user declined; tilt stays unknown */ } }
   }
-  start() { addEventListener('deviceorientation', this.handler); }
-  stop() { removeEventListener('deviceorientation', this.handler); }
-  /** Degrees away from upright portrait (beta 90°), or null when the device reports nothing. */
-  value() { return this.beta === null ? null : this.beta - 90; }
+  constructor(private selfie = false) {}
+  start() { addEventListener('devicemotion', this.handler); }
+  stop() { removeEventListener('devicemotion', this.handler); }
+  /** World up in camera coordinates (the selfie camera faces the other way: x and z flip). */
+  up(): [number, number, number] | null {
+    if (!this.g) return null;
+    const l = Math.hypot(...this.g) || 1, [x, y, z] = [this.g[0] / l, this.g[1] / l, this.g[2] / l];
+    return this.selfie ? [-x, y, -z] : [x, y, z];
+  }
+  /** Degrees away from upright, or null when the device reports nothing. */
+  value() { const u = this.up(); return u ? (Math.acos(Math.min(1, u[1])) * 180) / Math.PI : null; }
 }
 
 export class CameraFeed implements Feed {
@@ -49,7 +69,7 @@ export class CameraFeed implements Feed {
     video.muted = true;
     video.playsInline = true;
     await video.play();
-    const tilt = new Tilt();
+    const tilt = new Tilt(facing === 'user');
     tilt.start();
     return new CameraFeed(video, stream, pose, facing === 'user', tilt);
   }
@@ -73,6 +93,7 @@ export class CameraFeed implements Feed {
     return copy;
   }
   tilt() { return this.tiltSensor.value(); }
+  gravityUp() { return this.tiltSensor.up(); }
   stop() { this.stream.getTracks().forEach(t => t.stop()); this.video.srcObject = null; this.tiltSensor.stop(); }
 }
 

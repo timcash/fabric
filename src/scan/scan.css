@@ -105,3 +105,5 @@ figcaption { color: var(--muted); font-size: .75rem; margin-top: .3rem; }
 
 .stage .sim-inset { position: absolute; left: 12px; top: 12px; width: min(30%, 220px); height: auto; aspect-ratio: 1; border-radius: 12px; border: 1px solid #ffffff30; background: #0b0f16cc; }
 .sim-badge { position: absolute; left: 12px; bottom: 10px; margin: 0; padding: .3rem .6rem; border-radius: 999px; background: #080b10cc; color: var(--muted); font-size: .72rem; }
+
+#path-figure svg { width: 100%; max-width: 360px; display: block; margin: 0 auto; background: radial-gradient(circle, #141c28, #0b0f16); border-radius: 10px; }
