@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#080b10" />
+    <meta name="description" content="Measure a human body with a phone camera: on-device pose and segmentation, metric scale from height, and turn-in-place girths." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Fabric Body Scan</title>
+  </head>
+  <body class="scan-app" data-screen="setup">
+    <header class="scan-bar">
+      <a class="wordmark" href="./" aria-label="Fabric home">FABRIC<span>BODY SCAN</span></a>
+      <button id="units" class="chip" aria-label="Switch units">cm</button>
+    </header>
+
+    <main>
+      <section id="setup" class="screen" aria-labelledby="setup-title">
+        <p class="eyebrow">On-device · nothing is uploaded</p>
+        <h1 id="setup-title">Measure a body<br /><span>with a phone camera.</span></h1>
+        <p class="lede">Prop the phone upright at waist height, step back 2.5–3 m, and follow the prompts: one front pose, then one slow turn with arms raised. Your height sets the metric scale.</p>
+        <form id="setup-form" class="card" novalidate>
+          <div class="field">
+            <label for="height">Height</label>
+            <div class="height-row">
+              <input id="height" name="height" type="number" inputmode="decimal" min="100" max="230" step="0.1" placeholder="175" required />
+              <select id="height-unit" aria-label="Height unit"><option value="cm">cm</option><option value="in">in</option></select>
+            </div>
+            <p class="hint" id="height-hint">Barefoot, without hair volume. Every length scales with this number.</p>
+          </div>
+          <fieldset class="field">
+            <legend>Camera</legend>
+            <label class="radio"><input type="radio" name="facing" value="environment" checked /> Rear (someone else holds or props the phone)</label>
+            <label class="radio"><input type="radio" name="facing" value="user" /> Front / selfie (scan yourself; phone propped)</label>
+          </fieldset>
+          <label class="toggle"><input type="checkbox" id="turn" checked /> 360° turn — most accurate chest, waist and hip</label>
+          <label class="toggle"><input type="checkbox" id="voice" checked /> Spoken prompts</label>
+          <p class="error" id="setup-error" role="alert" hidden></p>
+          <div class="actions">
+            <button type="submit" class="primary" id="start-camera">Start camera scan</button>
+            <button type="button" class="secondary" id="start-demo">Try the demo body</button>
+          </div>
+        </form>
+        <details class="card" id="photo-mode">
+          <summary>Measure two photos instead</summary>
+          <p class="hint">A front photo (arms 30–45° out, feet apart) and a side photo (arms relaxed or raised), full body, phone upright, same spot.</p>
+          <label class="file">Front photo <input type="file" id="front-photo" accept="image/*" /></label>
+          <label class="file">Side photo (optional) <input type="file" id="side-photo" accept="image/*" /></label>
+          <button type="button" class="secondary" id="measure-photos">Measure photos</button>
+        </details>
+        <ol class="tips">
+          <li><strong>Fitted clothing.</strong> The mask follows fabric: loose clothes read as body.</li>
+          <li><strong>Plain, uncluttered background</strong> and even light.</li>
+          <li><strong>Phone upright</strong> (level indicator turns green) at about waist height.</li>
+          <li><strong>Whole body in frame</strong> with a little space above the head and below the feet.</li>
+        </ol>
+      </section>
+
+      <section id="capture" class="screen" hidden aria-labelledby="step-title">
+        <div class="stage">
+          <video id="video" playsinline muted hidden></video>
+          <canvas id="live" aria-label="Camera view with body outline"></canvas>
+          <div class="countdown" id="countdown" aria-hidden="true"></div>
+        </div>
+        <div class="hud">
+          <p class="step-count" id="step-count"></p>
+          <h2 id="step-title"></h2>
+          <p id="step-instruction" aria-live="polite"></p>
+          <ul class="checks" id="checks" aria-label="Capture checks"></ul>
+          <div class="turn-dial" id="turn-dial" hidden><svg viewBox="-50 -50 100 100" aria-hidden="true"><g id="dial-bins"></g></svg><span id="dial-label">0%</span></div>
+          <p class="status" id="capture-status" role="status"></p>
+          <div class="actions">
+            <button type="button" class="primary" id="capture-now">Capture now</button>
+            <button type="button" class="secondary" id="cancel-scan">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="results" class="screen" hidden aria-labelledby="results-title">
+        <p class="eyebrow" id="results-source">Results</p>
+        <h1 id="results-title">Your measurements</h1>
+        <div class="summary" id="summary"></div>
+        <ul class="warnings" id="warnings"></ul>
+        <div class="results-grid">
+          <div class="card table-card">
+            <table id="measurements"><thead><tr><th scope="col">Measurement</th><th scope="col">Value</th><th scope="col">±</th><th scope="col">Method</th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="card views">
+            <div class="view3d" id="view3d" aria-label="3D cross-sections of the measured body"></div>
+            <div class="thumbs"><figure><canvas id="front-view"></canvas><figcaption>Front</figcaption></figure><figure id="side-figure"><canvas id="side-view"></canvas><figcaption>Profile</figcaption></figure></div>
+          </div>
+        </div>
+        <div class="actions export">
+          <button type="button" class="secondary" id="download-csv">Download CSV</button>
+          <button type="button" class="secondary" id="download-json">Download JSON</button>
+          <button type="button" class="secondary" id="download-package" hidden>Capture package for splatting (.zip)</button>
+          <button type="button" class="primary" id="new-scan">New scan</button>
+        </div>
+        <details class="card method">
+          <summary>How these numbers are made</summary>
+          <ul>
+            <li><strong>Scale:</strong> the person mask’s head-to-heel span in the front frame equals your height, giving centimetres per pixel at your body plane.</li>
+            <li><strong>Levels:</strong> pose landmarks place the neck, chest (27% down the torso), waist (narrowest), hip (fullest), thigh (3 cm below the crotch), knee, calf and ankle.</li>
+            <li><strong>Turntable girths:</strong> while you turn, each frame gives the torso’s caliper width from one angle. A tape follows the convex outline, whose perimeter is the integral of those widths over half a turn (Cauchy’s formula), so no ellipse is assumed.</li>
+            <li><strong>Two-view girths:</strong> front width and profile depth, with an elliptical cross-section.</li>
+            <li><strong>±</strong> is a design estimate per method, not a validated accuracy. Clothing, hair, posture and camera tilt dominate real-world error.</li>
+          </ul>
+        </details>
+      </section>
+    </main>
+    <script type="module" src="/src/scan/main.ts"></script>
+  </body>
+</html>

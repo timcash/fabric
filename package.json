@@ -1,0 +1,38 @@
+{
+  "name": "fabric",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "test:browser": "node --experimental-strip-types scripts/browser-test.ts",
+    "test:dag": "node --experimental-strip-types scripts/dag-browser-test.ts",
+    "test:walkthrough": "node --experimental-strip-types scripts/walkthrough-browser-test.ts",
+    "check": "npm test && npm run build && npm run test:browser && npm run test:dag && npm run test:walkthrough && npm run test:scan",
+    "deploy": "npm run build && wrangler deploy",
+    "predev": "node --experimental-strip-types scripts/prepare-pose-assets.ts",
+    "prebuild": "node --experimental-strip-types scripts/prepare-pose-assets.ts",
+    "test:scan": "node --experimental-strip-types scripts/scan-browser-test.ts"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.1.1",
+    "fflate": "^0.8.2",
+    "h3-js": "^4.5.0",
+    "marked": "^16.2.1",
+    "three": "^0.179.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/three": "^0.179.0",
+    "puppeteer-core": "^24.43.1",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.2",
+    "wrangler": "^4.112.0"
+  }
+}
