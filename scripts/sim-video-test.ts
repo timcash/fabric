@@ -130,13 +130,13 @@ try {
 
   const mp4 = join(out, 'body-scan-simulation.mp4'), phoneMp4 = join(out, 'body-scan-mobile.mp4'), phoneGif = join(out, 'body-scan-mobile-preview.gif');
   try {
-    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', phoneWebm, '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '24', '-movflags', '+faststart', phoneMp4]);
+    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', phoneWebm, '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '28', '-movflags', '+faststart', phoneMp4]);
     // A small, sped-up looping preview (GitHub READMEs show GIFs inline, not MP4s).
-    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', phoneMp4, '-vf', 'setpts=PTS/5,fps=5,scale=240:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=64[p];[b][p]paletteuse=dither=bayer:bayer_scale=4', '-loop', '0', phoneGif]);
+    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', phoneMp4, '-vf', 'setpts=PTS/5,fps=5,scale=220:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=64[p];[b][p]paletteuse=dither=bayer:bayer_scale=4', '-loop', '0', phoneGif]);
     await rm(phoneWebm);
   } catch { log('ffmpeg unavailable: keeping the phone .webm only'); }
   try {
-    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', webm, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '23', '-movflags', '+faststart', mp4]);
+    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', webm, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '28', '-movflags', '+faststart', mp4]);
     await rm(webm);
   } catch { log('ffmpeg/libx264 unavailable: keeping the .webm only'); }
   const path = (t: Trajectory) => t ? `Camera path: ${t.frames} frames, ${t.ateCm} cm RMS position error (angle ${t.angleErrDeg}°, height ${t.heightErrCm} cm, distance ${t.distanceErrCm} cm).` : '';

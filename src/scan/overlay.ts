@@ -17,12 +17,12 @@ export function drawLive(ctx: CanvasRenderingContext2D, image: { draw(c: CanvasR
     if (tint.width !== obs.width || tint.height !== obs.height) { tint.width = obs.width; tint.height = obs.height; }
     const t = tint.getContext('2d')!;
     const img = t.createImageData(obs.width, obs.height), d = img.data, m = obs.mask.data;
-    const [r, g, b] = ready ? [80, 220, 150] : [102, 172, 255];
+    const [r, g, b] = ready ? [80, 255, 160] : [62, 240, 255];
     for (let i = 0; i < m.length; i++) { const k = i * 4; d[k] = r; d[k + 1] = g; d[k + 2] = b; d[k + 3] = m[i] * 90; }
     t.putImageData(img, 0, 0);
     ctx.drawImage(tint, 0, 0, W, H);
     ctx.lineWidth = Math.max(2, W / 260);
-    ctx.strokeStyle = ready ? '#50dc96' : '#66acff';
+    ctx.strokeStyle = ready ? '#50ffa0' : '#3ef0ff';
     ctx.beginPath();
     for (const [a, b2] of BONES) {
       const p = obs.landmarks[a], q = obs.landmarks[b2];
@@ -33,13 +33,19 @@ export function drawLive(ctx: CanvasRenderingContext2D, image: { draw(c: CanvasR
   ctx.restore();
 }
 
+/** Target brackets: where the whole body should fit. */
 export function drawGuide(ctx: CanvasRenderingContext2D) {
   const { width: W, height: H } = ctx.canvas;
+  const x0 = W * 0.08, x1 = W * 0.92, y0 = H * 0.04, y1 = H * 0.96, L = W * 0.07;
   ctx.save();
-  ctx.setLineDash([10, 10]);
-  ctx.strokeStyle = '#ffffff55';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(W * 0.18, H * 0.04, W * 0.64, H * 0.92);
+  ctx.strokeStyle = 'rgba(62, 240, 255, .75)';
+  ctx.lineWidth = Math.max(2, W / 240);
+  ctx.shadowColor = '#3ef0ff'; ctx.shadowBlur = W / 80;
+  ctx.beginPath();
+  for (const [x, y, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]]) {
+    ctx.moveTo(x + dx * L, y); ctx.lineTo(x, y); ctx.lineTo(x, y + dy * L);
+  }
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -78,7 +84,12 @@ export function drawAnalysis(target: HTMLCanvasElement, image: HTMLCanvasElement
 }
 
 export function renderChecks(list: HTMLElement, checks: readonly Check[]) {
-  list.replaceChildren(...checks.map(c => {
+  const summary = document.createElement('li');
+  const ok = checks.filter(c => c.ok).length;
+  summary.dataset.check = 'summary';
+  summary.dataset.ok = String(ok === checks.length);
+  summary.textContent = `SYSTEMS ${ok}/${checks.length}`;
+  list.replaceChildren(summary, ...checks.map(c => {
     const li = document.createElement('li');
     li.dataset.ok = String(c.ok);
     li.dataset.check = c.id;

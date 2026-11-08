@@ -23,6 +23,8 @@
     "media:readme": "mkdir -p public/media docs/media && cp test-results/body-scan-sim/body-scan-mobile.mp4 test-results/body-scan-sim/body-scan-simulation.mp4 public/media/ && cp test-results/body-scan-sim/body-scan-mobile-preview.gif docs/media/"
   },
   "dependencies": {
+    "@fontsource/rajdhani": "^5.2.5",
+    "@fontsource/share-tech-mono": "^5.2.5",
     "@mediapipe/tasks-vision": "^1.1.1",
     "fflate": "^0.8.2",
     "h3-js": "^4.5.0",

@@ -45,14 +45,17 @@ export function showBody(container: HTMLElement, report: Report, front: FrontAna
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(35, W / H, 0.01, 20);
   const heightM = front.heightCm / 100;
-  camera.position.set(1.6, heightM * 0.65, 2.6);
+  camera.position.set(1.7, heightM * 0.7, 2.9);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(0, heightM * 0.5, 0);
   controls.enableDamping = true;
-  controls.autoRotate = !!ghost;
-  controls.autoRotateSpeed = 1.6;
+  controls.autoRotate = true; // a slow turntable, like a game's character screen
+  controls.autoRotateSpeed = 1.4;
   scene.add(new THREE.HemisphereLight(0xdde8ff, 0x101820, 2.2));
-  const grid = new THREE.GridHelper(2, 20, 0x3a4a60, 0x1c2633);
+  scene.fog = new THREE.Fog(0x05080d, 3.5, 7);
+  const grid = new THREE.GridHelper(4, 32, 0x3ef0ff, 0x123844);
+  (grid.material as THREE.Material).transparent = true;
+  (grid.material as THREE.Material).opacity = 0.55;
   scene.add(grid);
 
   const by = new Map<string, Measurement>(report.measurements.map(m => [m.id, m]));
@@ -64,7 +67,7 @@ export function showBody(container: HTMLElement, report: Report, front: FrontAna
     const depth = m.depthCm ?? (m.method === 'front-estimate' ? m.widthCm * 0.72 : m.widthCm);
     return { y: m.levelCm / 100, x, a: m.widthCm / 200, b: depth / 200, color: COLOR[id] ?? 0xffffff, axis };
   };
-  const surface = new THREE.MeshStandardMaterial({ color: 0x9fb4d0, transparent: true, opacity: 0.22, side: THREE.DoubleSide, roughness: 0.8 });
+  const surface = new THREE.MeshStandardMaterial({ color: 0x3ef0ff, emissive: 0x0a3a44, transparent: true, opacity: 0.18, side: THREE.DoubleSide, roughness: 0.6 });
   const torso = ['hip', 'waist', 'chest', 'neck'].map(id => ring(id)).filter((r): r is Ring => !!r);
   const all: Ring[] = [...torso];
   if (torso.length > 1) scene.add(loft(torso, surface));
@@ -103,8 +106,19 @@ export function showBody(container: HTMLElement, report: Report, front: FrontAna
   scene.add(new THREE.Line(pole, new THREE.LineDashedMaterial({ color: 0x66acff, dashSize: 0.04, gapSize: 0.03 })).computeLineDistances());
 
   let frame = 0;
+  // Fill the container and follow its size (full screen, or the top half on phones).
+  const fit = () => {
+    const w = container.clientWidth || W, h = container.clientHeight || H;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.position.setLength(Math.max(2.9, 2.9 * (0.75 / Math.min(camera.aspect, 0.75)) ** 0.8));
+    camera.updateProjectionMatrix();
+  };
+  const resize = new ResizeObserver(fit);
+  resize.observe(container);
+  fit();
   const loop = () => { controls.update(); renderer.render(scene, camera); frame = requestAnimationFrame(loop); };
   loop();
   container.dataset.rendered = 'true';
-  return () => { cancelAnimationFrame(frame); controls.dispose(); renderer.dispose(); };
+  return () => { cancelAnimationFrame(frame); resize.disconnect(); controls.dispose(); renderer.dispose(); };
 }

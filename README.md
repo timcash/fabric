@@ -14,7 +14,7 @@ Installed, it opens full screen in portrait and works offline. The pose model is
 <p align="center">
   <a href="https://timcash.github.io/fabric/media/body-scan-mobile.mp4"><img src="docs/media/body-scan-mobile-preview.gif" width="240" alt="End-to-end test on a phone-size screen: setup, front capture with arms out, a helper walking around the subject in a room, and the results scored against the 3D body" /></a>
 </p>
-<p align="center"><sub><b>End-to-end test on a phone screen (393 × 852), 5× speed.</b> A simulated helper walks around a CC0 3D body in a furnished room; real MediaPipe runs on every rendered frame.<br /><a href="https://timcash.github.io/fabric/media/body-scan-mobile.mp4">Full phone video (106 s)</a> · <a href="https://timcash.github.io/fabric/media/body-scan-simulation.mp4">Desktop layout</a> · recorded by <code>npm run test:sim</code></sub></p>
+<p align="center"><sub><b>End-to-end test on a phone screen (393 × 852), 5× speed.</b> Start menu → target acquired → a simulated helper walks around a CC0 3D body in a furnished room while live AR stat tags lock onto the body → the 3D character sheet. Real MediaPipe runs on every rendered frame.<br /><a href="https://timcash.github.io/fabric/media/body-scan-mobile.mp4">Full phone video (128 s)</a> · <a href="https://timcash.github.io/fabric/media/body-scan-simulation.mp4">Desktop layout</a> · recorded by <code>npm run test:sim</code></sub></p>
 
 Fabric started from [timcash/template](https://github.com/timcash/template) (Vite + TypeScript + Three.js, copied at `be59c4f`). The scanner is the home page ([index.html](index.html)); the template's slide deck lives at [deck.html](deck.html).
 
@@ -37,6 +37,21 @@ npm run test:sim # simulated scan of a 3D body, scored against the mesh, recorde
 | [public/brand/](public/brand) | The logo: a T-pose figure, the app's scan pose, with a tape ring at the waist. Includes 192/512, maskable and Apple touch icons, and a share card. `scripts/make-icons.ts` re-renders the PNGs from the SVGs. |
 
 On phones the capture screen fills the display. The guidance sits above the camera and the controls below it, so the whole frame, head to feet, stays visible. The layout respects notch and home-bar safe areas.
+
+## One screen, game-style HUD
+
+The app is a single full-screen view. The camera feed, or after a scan the rotating 3D body, is always behind, and everything else is HUD on top:
+
+- **Start menu:** a holographic grid, the height input, mode cards (Helper lap / Solo spin / Quick) and START.
+- **Scanning:**
+  - a mission briefing and system-status pips (phones show only what needs fixing);
+  - target brackets and a sweeping scan line;
+  - **live AR callouts** on the body at every measurement level, with values that refine and lock green as the angles come in;
+  - a live-stats panel on wider screens, a coverage radar, and banners: TARGET ACQUIRED, countdown, FRONT LOCKED;
+  - FPS, tilt and views telemetry, plus game sounds as each 10° sector locks.
+- **Results:** the measured body spins as a hologram with neon girth rings. The headline stats roll up, and a translucent stat sheet holds every measurement, the camera-path radar, snapshots and exports. On phones the sheet slides up from the bottom and the body stays in the top half.
+
+Fonts (Rajdhani, Share Tech Mono; OFL) are self-hosted, so the HUD works offline and under the strict CSP.
 
 ## How a scan works: arms out, the whole time
 
@@ -112,7 +127,8 @@ A rendered mannequin is not a person in clothes, so real-world error will be lar
 | `src/scan/geometry.ts`, `mask.ts` | Ellipse/Cauchy perimeters; sub-pixel runs, chords, connected vertical extent |
 | `src/scan/quality.ts` | Live capture checks, including arms out |
 | `src/scan/pose-mediapipe.ts`, `feeds.ts` | Self-hosted MediaPipe, camera feed, tilt |
-| `src/scan/main.ts`, `index.html`, `scan.css` | Capture flow and results UI |
+| `src/scan/main.ts`, `index.html`, `scan.css` | The full-screen game view: start menu, scanning HUD, results sheet |
+| `src/scan/ar.ts` | Live AR callouts: measurement levels placed through each frame's joints, with running values |
 | `src/scan/pwa.ts`, `public/manifest.webmanifest`, `scripts/service-worker.ts` | Installable app: install prompt, fullscreen and wake lock, offline cache |
 | `src/scan/view3d.ts`, `capture-package.ts` | 3D cross-sections (with the true mesh in simulation); zip export for splatting |
 | `src/scan/synthetic.ts` | Orthographic parametric body for fast geometry unit tests |

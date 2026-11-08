@@ -20,124 +20,129 @@
     <meta name="twitter:card" content="summary_large_image" />
     <title>Fabric Body Scan</title>
   </head>
-  <body class="scan-app" data-screen="setup">
-    <header class="scan-bar">
-      <a class="wordmark" href="./" aria-label="Fabric Body Scan home"><img src="/brand/logo.svg" alt="" width="28" height="28" />FABRIC<span>BODY SCAN</span></a>
+  <body class="game" data-screen="setup">
+    <!-- One full-screen view. The stage (camera feed, or the 3D body after a scan) is always behind; every panel is HUD on top. -->
+    <div class="stage" id="stage">
+      <div class="menu-bg" aria-hidden="true"><div class="grid-floor"></div><img class="holo" src="/brand/logo.svg" alt="" /></div>
+      <video id="video" playsinline muted hidden></video>
+      <canvas id="live" aria-label="Camera view with body outline and live measurements"></canvas>
+      <div class="view3d" id="view3d" aria-label="3D cross-sections of the measured body"></div>
+    </div>
+    <div class="fx" aria-hidden="true"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i><div class="sweep"></div></div>
+
+    <header class="hud-bar">
+      <a class="wordmark" href="./" aria-label="Fabric Body Scan home"><img src="/brand/logo.svg" alt="" width="26" height="26" />FABRIC<span>//&nbsp;BODY SCAN</span></a>
+      <span class="phase" id="hud-phase">STANDBY</span>
+      <span class="telemetry" id="telemetry" aria-hidden="true"></span>
       <button id="units" class="chip" aria-label="Switch units">cm</button>
     </header>
 
     <main>
-      <section id="setup" class="screen" aria-labelledby="setup-title">
-        <p class="eyebrow">On-device · nothing is uploaded</p>
-        <h1 id="setup-title">Measure a body<br /><span>with a phone camera.</span></h1>
-        <p class="lede">Stand with both arms straight out to the sides for the whole scan. A helper takes one front view, then walks a slow circle around you about 2.5 m away, keeping you head to feet in frame. No helper? Prop the phone and turn on the spot. Your height sets the metric scale; the phone's motion sensor levels every frame.</p>
-        <form id="setup-form" class="card" novalidate>
-          <div class="field">
-            <label for="height">Height</label>
-            <div class="height-row">
-              <input id="height" name="height" type="number" inputmode="decimal" min="100" max="230" step="0.1" placeholder="175" required />
-              <select id="height-unit" aria-label="Height unit"><option value="cm">cm</option><option value="in">in</option></select>
+      <section id="setup" class="layer menu" aria-labelledby="setup-title">
+        <div class="menu-panel">
+          <p class="eyebrow">On-device · nothing is uploaded</p>
+          <h1 id="setup-title">BODY<span>SCAN</span></h1>
+          <p class="lede">Arms straight out to the sides. One front view, then one slow lap around you. Your height sets the scale; the phone's motion sensor levels every frame.</p>
+          <form id="setup-form" novalidate>
+            <div class="field">
+              <label for="height">Height <small>(sets the metric scale)</small></label>
+              <div class="height-row">
+                <input id="height" name="height" type="number" inputmode="decimal" min="100" max="230" step="0.1" placeholder="175" required />
+                <select id="height-unit" aria-label="Height unit"><option value="cm">cm</option><option value="in">in</option></select>
+              </div>
             </div>
-            <p class="hint" id="height-hint">Barefoot, without hair volume. Every length scales with this number.</p>
-          </div>
-          <fieldset class="field">
-            <legend>Camera</legend>
-            <label class="radio"><input type="radio" name="facing" value="environment" checked /> Rear (someone else holds or props the phone)</label>
-            <label class="radio"><input type="radio" name="facing" value="user" /> Front / selfie (scan yourself; phone propped)</label>
-          </fieldset>
-          <fieldset class="field">
-            <legend>How will you scan?</legend>
-            <label class="radio"><input type="radio" name="mode" value="orbit" checked /> A helper walks around you with the phone (recommended)</label>
-            <label class="radio"><input type="radio" name="mode" value="turn" /> Prop the phone and turn on the spot</label>
-            <label class="radio"><input type="radio" name="mode" value="profile" /> Quick: front and side only</label>
-          </fieldset>
-          <label class="toggle"><input type="checkbox" id="voice" checked /> Spoken prompts</label>
-          <p class="error" id="setup-error" role="alert" hidden></p>
-          <div class="actions">
-            <button type="submit" class="primary" id="start-camera">Start camera scan</button>
+            <fieldset class="field modes">
+              <legend>Mode</legend>
+              <label class="mode"><input type="radio" name="mode" value="orbit" checked /><b>HELPER LAP</b><span>A helper walks a circle around you. Most accurate.</span></label>
+              <label class="mode"><input type="radio" name="mode" value="turn" /><b>SOLO SPIN</b><span>Prop the phone; turn slowly on the spot.</span></label>
+              <label class="mode"><input type="radio" name="mode" value="profile" /><b>QUICK</b><span>Front and side only.</span></label>
+            </fieldset>
+            <fieldset class="field toggles">
+              <legend class="sr-only">Options</legend>
+              <label class="radio"><input type="radio" name="facing" value="environment" checked /> Rear camera</label>
+              <label class="radio"><input type="radio" name="facing" value="user" /> Selfie camera</label>
+              <label class="toggle"><input type="checkbox" id="voice" checked /> Voice</label>
+            </fieldset>
+            <p class="error" id="setup-error" role="alert" hidden></p>
+            <button type="submit" class="start" id="start-camera">START SCAN</button>
             <button type="button" class="secondary" id="start-demo">Simulate a scan (3D body)</button>
+          </form>
+          <div class="install" id="install-card" hidden>
+            <img src="/brand/icon-192.png" alt="" width="40" height="40" />
+            <div><strong>Install Fabric Scan</strong><p class="hint" id="install-hint">Add it to your home screen: full screen, works offline.</p></div>
+            <button type="button" class="secondary" id="install-app" hidden>Install</button>
           </div>
-        </form>
-        <details class="card" id="photo-mode">
-          <summary>Measure two photos instead</summary>
-          <p class="hint">A front photo and a side photo, both with arms straight out to the sides and feet apart: full body, phone upright, same spot.</p>
-          <label class="file">Front photo <input type="file" id="front-photo" accept="image/*" /></label>
-          <label class="file">Side photo (optional) <input type="file" id="side-photo" accept="image/*" /></label>
-          <button type="button" class="secondary" id="measure-photos">Measure photos</button>
-        </details>
-        <div class="card install" id="install-card" hidden>
-          <img src="/brand/icon-192.png" alt="" width="48" height="48" />
-          <div><strong>Install Fabric Scan</strong><p class="hint" id="install-hint">Add it to your home screen: it opens full screen and works offline.</p></div>
-          <button type="button" class="primary" id="install-app" hidden>Install</button>
+          <details id="photo-mode">
+            <summary>Measure two photos instead</summary>
+            <p class="hint">A front and a side photo, arms straight out to the sides, feet apart, full body, phone upright, same spot.</p>
+            <label class="file">Front photo <input type="file" id="front-photo" accept="image/*" /></label>
+            <label class="file">Side photo (optional) <input type="file" id="side-photo" accept="image/*" /></label>
+            <button type="button" class="secondary" id="measure-photos">Measure photos</button>
+          </details>
+          <details class="briefing">
+            <summary>Briefing</summary>
+            <ol class="tips">
+              <li><strong>Arms straight out, palms down,</strong> the whole scan. Frames with arms down don't count.</li>
+              <li><strong>Fitted clothing</strong>: the mask follows fabric.</li>
+              <li><strong>Phone upright</strong> at chest or waist height, about 2.5 m away.</li>
+              <li><strong>Head to feet in frame</strong>, with a little space around.</li>
+            </ol>
+          </details>
+          <footer class="site-footer">
+            <a href="https://github.com/timcash/fabric/blob/main/docs/body-scan-research.md">Research</a> ·
+            <a href="https://github.com/timcash/fabric">Source</a> ·
+            <a href="deck.html">Template deck</a>
+          </footer>
         </div>
-        <ol class="tips">
-          <li><strong>Arms straight out to the sides, palms down,</strong> for the whole scan. Frames with arms down are not measured.</li>
-          <li><strong>Fitted clothing.</strong> The mask follows fabric: loose clothes read as body.</li>
-          <li><strong>Plain, uncluttered background</strong> and even light.</li>
-          <li><strong>Phone upright</strong> (level indicator turns green) at about waist height.</li>
-          <li><strong>Whole body in frame</strong> with a little space above the head and below the feet.</li>
-        </ol>
-        <footer class="site-footer">
-          <img src="/brand/logo.svg" alt="" width="20" height="20" /> Fabric Body Scan ·
-          <a href="https://github.com/timcash/fabric/blob/main/docs/body-scan-research.md">Research notes</a> ·
-          <a href="https://github.com/timcash/fabric">Source</a> ·
-          <a href="deck.html">Template deck</a>
-        </footer>
       </section>
 
-      <section id="capture" class="screen" hidden aria-labelledby="step-title">
-        <div class="hud-top">
+      <section id="capture" class="layer hud" hidden aria-labelledby="step-title">
+        <div class="mission">
           <p class="step-count" id="step-count"></p>
           <h2 id="step-title"></h2>
           <p id="step-instruction" aria-live="polite"></p>
         </div>
-        <div class="stage" id="stage">
-          <video id="video" playsinline muted hidden></video>
-          <canvas id="live" aria-label="Camera view with body outline"></canvas>
-          <div class="countdown" id="countdown" aria-hidden="true"></div>
-        </div>
- <div class="hud">
-          <ul class="checks" id="checks" aria-label="Capture checks"></ul>
-          <div class="turn-dial" id="turn-dial" hidden><svg viewBox="-50 -50 100 100" aria-hidden="true"><g id="dial-bins"></g></svg><span id="dial-label">0%</span></div>
+        <ul class="checks" id="checks" aria-label="Capture checks"></ul>
+        <div class="live-stats" id="live-stats" aria-label="Live measurements" hidden></div>
+        <div class="countdown" id="countdown" aria-hidden="true"></div>
+        <div class="banner" id="banner" aria-hidden="true"></div>
+        <div class="hud-bottom">
+          <div class="turn-dial" id="turn-dial" hidden><svg viewBox="-50 -50 100 100" aria-hidden="true"><g id="dial-bins"></g><line class="radar-sweep" x1="0" y1="0" x2="0" y2="-46"/></svg><span><b id="dial-label">0°</b><small>COVERAGE</small></span></div>
           <p class="status" id="capture-status" role="status"></p>
           <div class="actions">
             <button type="button" class="primary" id="capture-now">Capture now</button>
-            <button type="button" class="secondary" id="cancel-scan">Cancel</button>
+            <button type="button" class="secondary" id="cancel-scan">Abort</button>
           </div>
         </div>
       </section>
 
-      <section id="results" class="screen" hidden aria-labelledby="results-title">
-        <p class="eyebrow" id="results-source">Results</p>
-        <h1 id="results-title">Your measurements</h1>
+      <section id="results" class="layer hud results" hidden aria-labelledby="results-title">
+        <div class="mission">
+          <p class="step-count" id="results-source">Results</p>
+          <h2 id="results-title">SCAN COMPLETE</h2>
+        </div>
         <div class="summary" id="summary"></div>
-        <ul class="warnings" id="warnings"></ul>
-        <div class="results-grid">
-          <div class="card table-card">
-            <table id="measurements"><thead><tr><th scope="col">Measurement</th><th scope="col">Value</th><th scope="col">±</th><th scope="col">Method</th></tr></thead><tbody></tbody></table>
+        <aside class="sheet" aria-label="All measurements">
+          <ul class="warnings" id="warnings"></ul>
+          <table id="measurements"><thead><tr><th scope="col">Stat</th><th scope="col">Value</th><th scope="col">±</th><th scope="col">Method</th></tr></thead><tbody></tbody></table>
+          <figure id="path-figure" hidden><svg id="path-plot" viewBox="-360 -360 720 720" role="img" aria-label="Top view: the subject in the centre and the camera path around them"></svg><figcaption id="path-caption"></figcaption></figure>
+          <div class="thumbs"><figure><canvas id="front-view"></canvas><figcaption>Front</figcaption></figure><figure id="side-figure"><canvas id="side-view"></canvas><figcaption>Profile</figcaption></figure></div>
+          <div class="actions export">
+            <button type="button" class="secondary" id="download-csv">CSV</button>
+            <button type="button" class="secondary" id="download-json">JSON</button>
+            <button type="button" class="secondary" id="download-package" hidden>Capture zip</button>
+            <button type="button" class="start" id="new-scan">NEW SCAN</button>
           </div>
-          <div class="card views">
-            <div class="view3d" id="view3d" aria-label="3D cross-sections of the measured body"></div>
-            <div class="thumbs"><figure><canvas id="front-view"></canvas><figcaption>Front</figcaption></figure><figure id="side-figure"><canvas id="side-view"></canvas><figcaption>Profile</figcaption></figure></div>
-            <figure id="path-figure" hidden><svg id="path-plot" viewBox="-360 -360 720 720" role="img" aria-label="Top view: the subject in the centre and the camera path around them"></svg><figcaption id="path-caption"></figcaption></figure>
-          </div>
-        </div>
-        <div class="actions export">
-          <button type="button" class="secondary" id="download-csv">Download CSV</button>
-          <button type="button" class="secondary" id="download-json">Download JSON</button>
-          <button type="button" class="secondary" id="download-package" hidden>Capture package for splatting (.zip)</button>
-          <button type="button" class="primary" id="new-scan">New scan</button>
-        </div>
-        <details class="card method">
-          <summary>How these numbers are made</summary>
-          <ul>
-            <li><strong>Scale:</strong> the person mask’s head-to-heel span in the front frame equals your height, giving centimetres per pixel at your body plane.</li>
-            <li><strong>Levels:</strong> pose landmarks place the neck (mid-neck), chest (27% down the torso), waist (narrowest), hip (fullest, near the hip joints), thigh (3 cm below the crotch), knee, calf and ankle.</li>
-            <li><strong>Turntable girths:</strong> while you turn with arms out, each frame gives the torso’s and each leg’s caliper width from one angle. A tape follows the convex outline, whose perimeter is the integral of those widths over half a turn (Cauchy’s formula), so no ellipse is assumed. Each leg uses its own landmarks to correct for perspective as it swings nearer or farther.</li>
-            <li><strong>Two-view girths:</strong> front width and profile depth, with an elliptical cross-section.</li>
-            <li><strong>±</strong> is a design estimate per method, not a validated accuracy. Clothing, hair, posture and camera tilt dominate real-world error.</li>
-          </ul>
-        </details>
+          <details class="method">
+            <summary>How these numbers are made</summary>
+            <ul>
+              <li><strong>Scale:</strong> the person mask's head-to-heel span equals your height, giving centimetres per pixel at your body; every walk-around frame is re-scaled and leveled with the phone's gravity sensor.</li>
+              <li><strong>Levels:</strong> pose landmarks place the neck, chest, waist (narrowest), hip (fullest), thigh, knee, calf and ankle.</li>
+              <li><strong>Turntable girths:</strong> each frame gives a caliper width from one angle; a tape follows the convex outline, whose perimeter is the integral of those widths over half a turn (Cauchy's formula).</li>
+              <li><strong>±</strong> is a design estimate per method, not a validated accuracy.</li>
+            </ul>
+          </details>
+        </aside>
       </section>
     </main>
     <script type="module" src="/src/scan/main.ts"></script>

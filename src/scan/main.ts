@@ -1,4 +1,8 @@
+import '@fontsource/rajdhani/500.css';
+import '@fontsource/rajdhani/700.css';
+import '@fontsource/share-tech-mono/400.css';
 import './scan.css';
+import { callouts, drawCallouts } from './ar.ts';
 import { enterImmersive, exitImmersive, registerServiceWorker, setupInstall } from './pwa.ts';
 import { DEG, foldAngle } from './geometry.ts';
 import { analyzeFront, analyzeSide, armsRaised, combineAnalyses, hipScale, type FrontAnalysis, type SideAnalysis } from './measure.ts';
@@ -24,6 +28,10 @@ let feed: Feed | null = null;
 let abort: AbortController | null = null;
 let manual = false;
 let disposeView: (() => void) | null = null;
+/** HUD state while scanning: the front analysis places AR levels; the running report feeds the stat readouts. */
+let hudFront: FrontAnalysis | null = null;
+let liveReport: Report | null = null;
+let frameTimes: number[] = [];
 let current: { report: Report; front: FrontAnalysis; frontObs: Observation; frontImage: HTMLCanvasElement; side: SideAnalysis | null; sideObs: Observation | null; sideImage: HTMLCanvasElement | null; frames: PackagedFrame[]; sim: SimFeed | null; comparison: Comparison[] | null; samples: TurnSample[]; trajectory: TrajectoryError | null; mode: AroundMode | 'profile' } | null = null;
 
 try { const u = localStorage.getItem('fabric-body-scan:units'); if (u === 'in' || u === 'cm') units = u; } catch { /* storage unavailable */ }
@@ -31,7 +39,32 @@ try { const u = localStorage.getItem('fabric-body-scan:units'); if (u === 'in' |
 function show(screen: 'setup' | 'capture' | 'results') {
   for (const id of ['setup', 'capture', 'results']) $(id).hidden = id !== screen;
   document.body.dataset.screen = screen;
-  window.scrollTo(0, 0);
+  $('hud-phase').textContent = screen === 'setup' ? 'STANDBY' : screen === 'results' ? 'COMPLETE' : 'ACQUIRE';
+  if (screen !== 'capture') { $('telemetry').textContent = ''; hudFront = null; liveReport = null; $('live-stats').hidden = true; }
+}
+
+/** A centre-screen callout, like a game's event banner. */
+function banner(text: string) {
+  const b = $('banner');
+  b.textContent = text;
+  b.classList.remove('show');
+  void b.offsetWidth; // restart the animation
+  b.classList.add('show');
+}
+
+const LIVE_SITES: [string, string][] = [['chest', 'Chest'], ['waist', 'Waist'], ['hip', 'Hip'], ['thigh', 'Thigh'], ['knee', 'Knee'], ['calf', 'Calf'], ['ankle', 'Ankle'], ['neck', 'Neck'], ['bicep', 'Upper arm']];
+/** Running stat readout; the bar shows how well each value is pinned down (angles covered, or the method). */
+function renderLiveStats(report: Report, samples: readonly TurnSample[] = []) {
+  const box = $('live-stats');
+  box.hidden = false;
+  const bins = samples.length ? Math.min(1, circleCoverage(samples).filter(Boolean).length / 30) : 0;
+  const rows = LIVE_SITES.map(([id, name]) => {
+    const m = report.measurements.find(x => x.id === id);
+    if (!m) return '';
+    const q = m.method === 'turntable' ? 40 + 60 * bins : m.method === 'two-view' ? 70 : m.method === 'circular' ? 45 : 30;
+    return `<div class="stat-row${m.method === 'turntable' || m.method === 'two-view' ? ' locked' : ''}" style="--q:${q.toFixed(0)}%"><span>${name}</span><b>${formatLength(m.cm, units)}</b><i></i></div>`;
+  }).join('');
+  box.innerHTML = `<h3>// LIVE STATS</h3>${rows}`;
 }
 function setUnits(next: Units) {
   units = next;
@@ -82,11 +115,17 @@ async function loadPose(): Promise<PoseSource> {
 const live = $<HTMLCanvasElement>('live');
 const liveCtx = live.getContext('2d')!;
 
-function paint(frame: Frame, checks: readonly Check[], ready: boolean) {
+function paint(frame: Frame, checks: readonly Check[], ready: boolean, views = 0) {
   if (live.width !== frame.width || live.height !== frame.height) { live.width = frame.width; live.height = frame.height; }
   drawLive(liveCtx, frame, frame.obs, ready, feed?.mirror ?? false);
   drawGuide(liveCtx);
+  if (hudFront && frame.obs) drawCallouts(liveCtx, callouts(frame.obs, hudFront, liveReport, units), feed?.mirror ?? false);
   renderChecks($('checks'), checks);
+  const now = performance.now();
+  frameTimes = [...frameTimes.filter(t => now - t < 2000), now];
+  const fps = frameTimes.length > 1 ? (frameTimes.length - 1) / ((now - frameTimes[0]) / 1000) : 0;
+  const tilt = feed?.tilt();
+  $('telemetry').textContent = `FPS ${fps.toFixed(0).padStart(2, '0')} · TILT ${tilt == null ? '--' : `${tilt.toFixed(1)}°`}${views ? ` · VIEWS ${views}` : ''}`;
 }
 function stepHeader(n: number, total: number, title: string, instruction: string) {
   $('step-count').textContent = `Step ${n} of ${total}`;
@@ -95,6 +134,7 @@ function stepHeader(n: number, total: number, title: string, instruction: string
   $('capture-status').textContent = '';
   $('countdown').textContent = '';
   $('capture-now').textContent = title === 'Turn' ? 'Finish turn' : title === 'Walk around' ? 'Finish walk' : 'Capture now';
+  $('hud-phase').textContent = n === 1 ? 'ACQUIRE' : 'SCANNING';
   say(instruction);
 }
 
@@ -106,7 +146,7 @@ const level = (o: Observation | null) => (o ? rectify(o, feed?.gravityUp?.()) : 
 async function captureStill(step: 'front' | 'profile', signal: AbortSignal, refShoulderSpan?: number, handheld = false): Promise<Still> {
   const still = new Stillness();
   const started = performance.now();
-  let okSince: number | null = null, spokenHint = 0;
+  let okSince: number | null = null, spokenHint = 0, acquired = false;
   const collected: Observation[] = [];
   let image: HTMLCanvasElement | null = null;
   manual = false;
@@ -119,6 +159,7 @@ async function captureStill(step: 'front' | 'profile', signal: AbortSignal, refS
     if (manual && frame.obs) okSince ??= now - 3000;
     if (ok || manual) okSince ??= now; else if (!collected.length) okSince = null;
     paint(frame, checks, ok);
+    if (!acquired && checks.find(c => c.id === 'person')?.ok) { acquired = true; banner('TARGET ACQUIRED'); beep(660, 90); }
     if (okSince === null) {
       const failing = checks.find(c => !c.ok);
       if (failing && now - spokenHint > 4000) { $('capture-status').textContent = failing.hint; if (now - started > 2500) say(failing.hint); spokenHint = now; }
@@ -126,13 +167,16 @@ async function captureStill(step: 'front' | 'profile', signal: AbortSignal, refS
       continue;
     }
     const left = 3 - Math.floor((now - okSince) / 700);
-    if (left > 0) { $('countdown').textContent = String(left); $('capture-status').textContent = 'Hold still…'; continue; }
+    if (left > 0) {
+      if ($('countdown').textContent !== String(left)) beep(520 + (3 - left) * 120, 70);
+      $('countdown').textContent = String(left); $('capture-status').textContent = 'Hold still…'; continue;
+    }
     $('countdown').textContent = '';
     if (frame.obs && checks.find(c => c.id === 'person')?.ok) {
       if (!collected.length) { beep(); image = feed!.snapshot(); }
       collected.push(level(frame.obs)!);
       $('capture-status').textContent = `Capturing ${collected.length}/6`;
-      if (collected.length >= 6) { beep(1320, 180); return { obs: collected, image: image! }; }
+      if (collected.length >= 6) { beep(1320, 180); banner(step === 'front' ? 'FRONT LOCKED' : 'PROFILE LOCKED'); return { obs: collected, image: image! }; }
     }
   }
   throw new DOMException('cancelled', 'AbortError');
@@ -146,7 +190,7 @@ function drawDial(bins: boolean[], coveredDeg: number) {
   bins.forEach((on, i) => {
     const a0 = (i * 10 - 90) * DEG, a1 = a0 + 9 * DEG;
     const p = (a: number, r: number) => `${(Math.cos(a) * r).toFixed(2)} ${(Math.sin(a) * r).toFixed(2)}`;
-    parts.push(`<path d="M ${p(a0, 30)} A 30 30 0 0 1 ${p(a1, 30)} L ${p(a1, 44)} A 44 44 0 0 0 ${p(a0, 44)} Z" fill="${on ? '#50dc96' : '#ffffff22'}"/>`);
+    parts.push(`<path d="M ${p(a0, 30)} A 30 30 0 0 1 ${p(a1, 30)} L ${p(a1, 44)} A 44 44 0 0 0 ${p(a0, 44)} Z" fill="${on ? '#50ffa0' : 'rgba(62,240,255,.14)'}"/>`);
   });
   g.innerHTML = parts.join('');
   $('dial-label').textContent = `${Math.min(360, Math.round(coveredDeg))}°`;
@@ -165,7 +209,7 @@ async function captureAround(front: FrontAnalysis, signal: AbortSignal, mode: Ar
   const samples: TurnSample[] = [], profiles: Turn['profiles'] = [], frames: PackagedFrame[] = [];
   let profileImage: HTMLCanvasElement | null = null;
   const started = performance.now();
-  let lastFrameKept = 0, armsOutAt: number | null = null;
+  let lastFrameKept = 0, armsOutAt: number | null = null, sectors = 0;
   manual = false;
   $('turn-dial').hidden = false;
   drawDial(circleCoverage([]), 0);
@@ -177,12 +221,13 @@ async function captureAround(front: FrontAnalysis, signal: AbortSignal, mode: Ar
     // Arms out is required: frames with the arms down are shown but never measured.
     const up = checks.find(c => c.id === 'arms')?.ok ?? false;
     if (up) armsOutAt ??= performance.now();
-    paint(frame, checks, up);
+    paint(frame, checks, up, samples.length);
     const o = level(frame.obs);
     if (o && up && armsOutAt !== null && checks.find(c => c.id === 'frame')?.ok) {
       const s = analyzeTurnFrame(o, front, mode);
       if (s) {
         samples.push(s);
+        if (samples.length % 5 === 0) { liveReport = buildReport(front, null, samples); renderLiveStats(liveReport, samples); }
         if (foldAngle(s.theta) > 80 * DEG && up && profiles.length < 10 && (!profiles.length || o.timestamp - profiles[profiles.length - 1].o.timestamp > 80)) {
           profiles.push({ o, theta: s.theta, facing: Math.cos(s.camera?.angle ?? 0) });
           profileImage ??= feed!.snapshot();
@@ -195,13 +240,15 @@ async function captureAround(front: FrontAnalysis, signal: AbortSignal, mode: Ar
       }
     }
     const { coveredDeg } = unwrapAngles(samples);
-    drawDial(circleCoverage(samples), coveredDeg);
+    const bins = circleCoverage(samples), filled = bins.filter(Boolean).length;
+    if (filled > sectors) { sectors = filled; beep(1500 + filled * 12, 35); }
+    drawDial(bins, coveredDeg);
     const turning = armsOutAt !== null ? performance.now() - armsOutAt : 0;
     $('capture-status').textContent = armsOutAt === null || !up ? 'Hold both arms straight out to the sides.' : mode === 'orbit' ? `Walking around… ${Math.round(coveredDeg)}° of 360°` : `Turning… ${samples.length} views`;
     const done = feed!.turnDone ? feed!.turnDone() : coveredDeg >= 345 && samples.length >= 30;
     const timeout = mode === 'orbit' ? 90000 : 25000;
     if (done || manual || (!feed!.turnDone && turning > timeout) || (armsOutAt === null && elapsed > 15000)) {
-      beep(1320, 180);
+      [880, 1175, 1568].forEach((f, i) => setTimeout(() => beep(f, 140), i * 120));
       $('turn-dial').hidden = true;
       return { samples, profiles, profileImage, frames };
     }
@@ -245,6 +292,9 @@ async function runCameraFlow(kind: 'camera' | 'sim') {
     const front = combineAnalyses(f.obs.map(o => analyzeFront(o, { kind: 'height', heightCm: h! })).filter((a): a is FrontAnalysis => !!a));
     if (!front) throw new Error('Could not find a full body outline in the front frames. Check lighting and framing, then try again.');
     requireTorso(front);
+    hudFront = front;
+    liveReport = buildReport(front, null, []);
+    renderLiveStats(liveReport);
     let side: SideAnalysis | null = null, sideObs: Observation | null = null, sideImage: HTMLCanvasElement | null = null;
     let samples: TurnSample[] = [], frames: PackagedFrame[] = [];
     if (mode !== 'profile') {
@@ -345,7 +395,7 @@ function showInset(inset: HTMLCanvasElement, detector: string, scenario: string)
   inset.setAttribute('aria-label', 'Simulation: the phone and the turning body seen from outside');
   const badge = document.createElement('p');
   badge.className = 'sim-badge';
-  badge.textContent = `Simulation · ${scenario === 'orbit' ? 'helper walks around in a room' : 'subject turns'} · ${detector === 'oracle' ? 'exact mask and joints' : 'MediaPipe on rendered frames'}`;
+  badge.textContent = `SIM · ${scenario === 'orbit' ? 'helper lap in a room' : 'solo spin'} · ${detector === 'oracle' ? 'exact mask' : 'MediaPipe'}`;
   $('stage').append(inset, badge);
 }
 
@@ -353,7 +403,7 @@ function renderResults() {
   if (!current) return;
   const { report, front, comparison } = current;
   const demo = !!comparison;
-  $('results-source').textContent = demo ? 'Simulation · scored against the posed 3D mesh' : `Scanned ${new Date(report.createdAt).toLocaleString()}`;
+  $('results-source').textContent = demo ? '// Simulation · scored against the 3D body' : `// Scanned ${new Date(report.createdAt).toLocaleString()}`;
   const fmt = (cm: number) => formatLength(cm, units);
   $('summary').replaceChildren(...['chest', 'waist', 'hip'].map(id => {
     const m = report.measurements.find(x => x.id === id);
@@ -362,6 +412,7 @@ function renderResults() {
     div.innerHTML = '<span></span><strong></strong><small></small>';
     div.children[0].textContent = LABELS[id as 'chest'];
     div.children[1].textContent = m ? fmt(m.cm) : '—';
+    if (m) countUp(div.children[1] as HTMLElement, m.cm);
     div.children[2].textContent = m ? `± ${fmt(m.errorCm)} · ${m.method}` : 'not measured';
     return div;
   }));
@@ -379,7 +430,7 @@ function renderResults() {
     return tr;
   }));
   $('warnings').replaceChildren(...report.warnings.map(w => { const li = document.createElement('li'); li.textContent = w; return li; }));
-  if (report.turnCoverage > 0) { const li = document.createElement('li'); li.className = 'info'; li.textContent = `Turn coverage: ${Math.round(report.turnCoverage * 100)}% of viewing angles.`; $('warnings').append(li); }
+  if (report.turnCoverage > 0) { const li = document.createElement('li'); li.className = 'info'; li.textContent = `COVERAGE ${Math.round(report.turnCoverage * 100)}% · ${current.samples.length} VIEWS`; $('warnings').append(li); }
   drawAnalysis($<HTMLCanvasElement>('front-view'), current.frontImage.width > 1 ? current.frontImage : paintMask(current.frontObs), front, current.frontObs);
   $('side-figure').hidden = !(current.side && current.sideObs);
   if (current.side && current.sideObs) drawAnalysis($<HTMLCanvasElement>('side-view'), current.sideImage ?? paintMask(current.sideObs), current.side, current.sideObs);
@@ -389,6 +440,17 @@ function renderResults() {
   disposeView = null;
   import('./view3d.ts').then(({ showBody }) => { if (current) disposeView = showBody($('view3d'), current.report, current.front, current.sim?.ghost()); });
   document.body.dataset.measured = String(report.measurements.length);
+}
+
+/** Game-style number roll-up for the headline stats. */
+function countUp(el: HTMLElement, cm: number) {
+  const start = performance.now();
+  const step = (now: number) => {
+    const t = Math.min(1, (now - start) / 700), e = 1 - (1 - t) ** 3;
+    el.textContent = formatLength(cm * e, units);
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 /** Top view of where the camera was, estimated from each frame (and the true path in simulation). */
@@ -402,17 +464,17 @@ function drawPath() {
   const pt = (angle: number, d: number) => [d * Math.sin(angle), d * Math.cos(angle)];
   const scr = (p: number[]) => [-p[0], -p[1]];
   const line = (pts: number[][]) => pts.map((p, i) => `${i ? 'L' : 'M'}${scr(p)[0].toFixed(1)} ${scr(p)[1].toFixed(1)}`).join(' ');
-  const parts = ['<circle r="300" fill="none" stroke="#ffffff14"/>', '<circle r="200" fill="none" stroke="#ffffff10"/>', '<circle r="100" fill="none" stroke="#ffffff10"/>',
-    '<ellipse rx="22" ry="14" fill="#9fb4d0"/><path d="M0 -14 L0 -40" stroke="#9fb4d0" stroke-width="4"/>'];
+  const parts = ['<circle r="300" fill="none" stroke="rgba(62,240,255,.25)"/>', '<circle r="200" fill="none" stroke="rgba(62,240,255,.18)"/>', '<circle r="100" fill="none" stroke="rgba(62,240,255,.14)"/>',
+    '<path d="M-340 0H340M0 -340V340" stroke="rgba(62,240,255,.12)"/>', '<ellipse rx="22" ry="14" fill="#3ef0ff"/><path d="M0 -14 L0 -40" stroke="#3ef0ff" stroke-width="4"/>'];
   if (current!.sim) {
     const truth = est.map(e => current!.sim!.cameras.get(e.s.timestamp)?.position).filter((p): p is [number, number, number] => !!p).map(p => [p[0], p[2]]);
     parts.push(`<path d="${line(truth)}" fill="none" stroke="#ffffffaa" stroke-width="3" stroke-dasharray="10 8"/>`);
   }
-  parts.push(`<path d="${line(est.map(e => pt(e.c.angle, e.c.distanceCm)))}" fill="none" stroke="#50dc96" stroke-width="4"/>`);
-  for (const e of est) { const [x, y] = scr(pt(e.c.angle, e.c.distanceCm)); parts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5" fill="#50dc96"/>`); }
+  parts.push(`<path d="${line(est.map(e => pt(e.c.angle, e.c.distanceCm)))}" fill="none" stroke="#50ffa0" stroke-width="4"/>`);
+  for (const e of est) { const [x, y] = scr(pt(e.c.angle, e.c.distanceCm)); parts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5" fill="#50ffa0"/>`); }
   svg.innerHTML = parts.join('');
   const t = current!.trajectory;
-  $('path-caption').textContent = `Camera path from above (subject faces up; rings every 1 m). Green: estimated from each frame` + (t ? `; dashed: true path. Error ${t.ateCm} cm RMS (angle ${t.angleErrDeg}°, height ${t.heightErrCm} cm, distance ${t.distanceErrCm} cm).` : '.');
+  $('path-caption').textContent = `CAMERA PATH · top view, subject faces up, rings 1 m. Green: estimated per frame` + (t ? `; dashed: true path. Error ${t.ateCm} cm RMS (angle ${t.angleErrDeg}°, height ${t.heightErrCm} cm, distance ${t.distanceErrCm} cm).` : '.');
 }
 
 function download(name: string, blob: Blob) {
