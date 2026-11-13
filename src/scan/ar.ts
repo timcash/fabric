@@ -53,34 +53,37 @@ export function callouts(o: Observation, front: FrontAnalysis, report: Report | 
   return out;
 }
 
-/** Draws callouts in canvas coordinates; `mirror` flips positions (selfie view) without mirroring the text. */
-export function drawCallouts(ctx: CanvasRenderingContext2D, items: readonly Callout[], mirror: boolean) {
-  const W = ctx.canvas.width, k = W / 420;
+export type Visible = { x: number; y: number; w: number; h: number };
+
+/**
+ * Draws callouts in canvas coordinates, in black and white: a line across the body and a value tag beside it.
+ * Locked values (measured from all angles) get a solid white tag. `mirror` flips positions (selfie view) without
+ * mirroring the text; `visible` is the part of the canvas on screen, so tags stay readable and in view.
+ */
+export function drawCallouts(ctx: CanvasRenderingContext2D, items: readonly Callout[], mirror: boolean, visible?: Visible) {
+  const W = ctx.canvas.width, vis = visible ?? { x: 0, y: 0, w: W, h: ctx.canvas.height }, k = vis.w / 360;
   ctx.save();
-  ctx.font = `${Math.round(13 * k)}px "Share Tech Mono", ui-monospace, monospace`;
+  ctx.font = `600 ${Math.round(13 * k)}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
   ctx.textBaseline = 'middle';
-  const h = 18 * k;
+  const h = 20 * k;
   let lastY = -Infinity;
   for (const c of [...items].sort((a, b) => a.y - b.y)) {
     const [x0, x1] = mirror ? [W - c.x1, W - c.x0] : [c.x0, c.x1];
     const ly = Math.max(c.y, lastY + h + 3 * k); // stack tags that would overlap; the leader bends to reach them
     lastY = ly;
-    const color = c.locked ? '#50ffa0' : '#3ef0ff';
-    ctx.strokeStyle = color; ctx.fillStyle = color;
-    ctx.shadowColor = color; ctx.shadowBlur = 8 * k;
+    const w = ctx.measureText(c.text).width + 10 * k;
+    ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2 * k;
     ctx.beginPath();
     ctx.moveTo(x0, c.y); ctx.lineTo(x1, c.y);
     for (const x of [x0, x1]) { ctx.moveTo(x, c.y - 5 * k); ctx.lineTo(x, c.y + 5 * k); }
-    const lx = Math.min(W - 6 * k - ctx.measureText(c.text).width - 12 * k, x1 + 18 * k);
-    ctx.moveTo(x1, c.y); ctx.lineTo(lx - 6 * k, ly); ctx.lineTo(lx, ly);
+    const lx = Math.min(vis.x + vis.w - 6 * k - w, x1 + 16 * k);
+    ctx.moveTo(x1, c.y); ctx.lineTo(lx - 5 * k, ly); ctx.lineTo(lx, ly);
     ctx.stroke();
-    const w = ctx.measureText(c.text).width + 10 * k;
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(3, 10, 16, .78)';
+    ctx.fillStyle = c.locked ? '#fff' : '#000';
     ctx.fillRect(lx, ly - h / 2, w, h);
     ctx.strokeRect(lx, ly - h / 2, w, h);
-    ctx.fillStyle = color;
+    ctx.fillStyle = c.locked ? '#000' : '#fff';
     ctx.fillText(c.text, lx + 5 * k, ly + 1);
   }
   ctx.restore();

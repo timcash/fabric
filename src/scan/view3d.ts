@@ -5,7 +5,7 @@ import type { FrontAnalysis } from './measure.ts';
 import type { Measurement, Report } from './report.ts';
 
 type Ring = { y: number; x: number; a: number; b: number; color: number; axis?: THREE.Vector3 };
-const COLOR: Record<string, number> = { neck: 0xc9a7ff, chest: 0x66acff, waist: 0x50dc96, hip: 0xffb35c, thigh: 0xff7a8a, knee: 0xffd166, calf: 0x7fe0ff, ankle: 0xd4d4d4, bicep: 0xf78fff, forearm: 0xb9f27c, wrist: 0xffe08a };
+const COLOR: Record<string, number> = {}; // black and white: every ring is white
 
 function ringPoints(r: Ring, n = 64): THREE.Vector3[] {
   const pts: THREE.Vector3[] = [];
@@ -51,9 +51,9 @@ export function showBody(container: HTMLElement, report: Report, front: FrontAna
   controls.enableDamping = true;
   controls.autoRotate = true; // a slow turntable, like a game's character screen
   controls.autoRotateSpeed = 1.4;
-  scene.add(new THREE.HemisphereLight(0xdde8ff, 0x101820, 2.2));
-  scene.fog = new THREE.Fog(0x05080d, 3.5, 7);
-  const grid = new THREE.GridHelper(4, 32, 0x3ef0ff, 0x123844);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x202020, 2.2));
+  scene.fog = new THREE.Fog(0x000000, 3.5, 7);
+  const grid = new THREE.GridHelper(4, 32, 0x777777, 0x333333);
   (grid.material as THREE.Material).transparent = true;
   (grid.material as THREE.Material).opacity = 0.55;
   scene.add(grid);
@@ -67,7 +67,7 @@ export function showBody(container: HTMLElement, report: Report, front: FrontAna
     const depth = m.depthCm ?? (m.method === 'front-estimate' ? m.widthCm * 0.72 : m.widthCm);
     return { y: m.levelCm / 100, x, a: m.widthCm / 200, b: depth / 200, color: COLOR[id] ?? 0xffffff, axis };
   };
-  const surface = new THREE.MeshStandardMaterial({ color: 0x3ef0ff, emissive: 0x0a3a44, transparent: true, opacity: 0.18, side: THREE.DoubleSide, roughness: 0.6 });
+  const surface = new THREE.MeshStandardMaterial({ color: 0xbbbbbb, emissive: 0x111111, transparent: true, opacity: 0.18, side: THREE.DoubleSide, roughness: 0.6 });
   const torso = ['hip', 'waist', 'chest', 'neck'].map(id => ring(id)).filter((r): r is Ring => !!r);
   const all: Ring[] = [...torso];
   if (torso.length > 1) scene.add(loft(torso, surface));
@@ -95,7 +95,7 @@ export function showBody(container: HTMLElement, report: Report, front: FrontAna
     g.setAttribute('position', new THREE.BufferAttribute(ghost.positions.map(v => v / 100), 3));
     g.setIndex(new THREE.BufferAttribute(ghost.triangles, 1));
     g.computeVertexNormals();
-    scene.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xd8c4b0, transparent: true, opacity: 0.35, roughness: 0.7, depthWrite: false })));
+    scene.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x999999, transparent: true, opacity: 0.35, roughness: 0.7, depthWrite: false })));
   }
   const head = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), surface);
   head.visible = !ghost;
@@ -103,7 +103,7 @@ export function showBody(container: HTMLElement, report: Report, front: FrontAna
   head.position.set(0, heightM - 0.11, 0);
   scene.add(head);
   const pole = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-0.45, 0, 0), new THREE.Vector3(-0.45, heightM, 0)]);
-  scene.add(new THREE.Line(pole, new THREE.LineDashedMaterial({ color: 0x66acff, dashSize: 0.04, gapSize: 0.03 })).computeLineDistances());
+  scene.add(new THREE.Line(pole, new THREE.LineDashedMaterial({ color: 0x888888, dashSize: 0.04, gapSize: 0.03 })).computeLineDistances());
 
   let frame = 0;
   // Fill the container and follow its size (full screen, or the top half on phones).

@@ -52,7 +52,7 @@ The takeaway for body scanning: **metric scale can be re-anchored every frame fr
 
 - Torso girths: +1% to +2%.
 - Legs: −0.4% to +5%.
-- Neck (front-only estimate): +12% to +14%, the weakest.
+- Neck (front-only estimate): +12% to +27% across runs, the weakest.
 
 The chest varies by a few percent between runs. With arms out, this body's chest girth changes about 1.7 cm per centimetre of height just below the armpits, so each walk-around frame places torso levels between its own shoulder- and hip-joint landmarks rather than using its floor line.
 

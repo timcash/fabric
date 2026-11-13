@@ -14,7 +14,7 @@ Installed, it opens full screen in portrait and works offline. The pose model is
 <p align="center">
   <a href="https://timcash.github.io/fabric/media/body-scan-mobile.mp4"><img src="docs/media/body-scan-mobile-preview.gif" width="240" alt="End-to-end test on a phone-size screen: setup, front capture with arms out, a helper walking around the subject in a room, and the results scored against the 3D body" /></a>
 </p>
-<p align="center"><sub><b>End-to-end test on a phone screen (393 × 852), 5× speed.</b> Start menu → target acquired → a simulated helper walks around a CC0 3D body in a furnished room while live AR stat tags lock onto the body → the 3D character sheet. Real MediaPipe runs on every rendered frame.<br /><a href="https://timcash.github.io/fabric/media/body-scan-mobile.mp4">Full phone video (128 s)</a> · <a href="https://timcash.github.io/fabric/media/body-scan-simulation.mp4">Desktop layout</a> · recorded by <code>npm run test:sim</code></sub></p>
+<p align="center"><sub><b>End-to-end test on a phone screen (393 × 852), 5× speed.</b> Start → front capture → a simulated helper walks around a CC0 3D body in a furnished room while measurement tags lock onto the body → results over the 3D body. Real MediaPipe runs on every rendered frame.<br /><a href="https://timcash.github.io/fabric/media/body-scan-mobile.mp4">Full phone video (108 s)</a> · <a href="https://timcash.github.io/fabric/media/body-scan-simulation.mp4">Desktop layout</a> · recorded by <code>npm run test:sim</code></sub></p>
 
 Fabric started from [timcash/template](https://github.com/timcash/template) (Vite + TypeScript + Three.js, copied at `be59c4f`). The scanner is the home page ([index.html](index.html)); the template's slide deck lives at [deck.html](deck.html).
 
@@ -34,24 +34,21 @@ npm run test:sim # simulated scan of a 3D body, scored against the mesh, recorde
 | [public/manifest.webmanifest](public/manifest.webmanifest) | Name "Fabric Body Scan" (home screen: "Fabric Scan"); opens `fullscreen`, falling back to `standalone`; portrait; dark theme; regular and maskable icons; a "Simulate a scan" shortcut. |
 | [scripts/service-worker.ts](scripts/service-worker.ts) | Generated into `sw.js` at build time. It precaches that build's exact hashed files and the icons, network-first for pages so new deploys show up, and caches the MediaPipe runtime, model and simulation mesh on first use for offline scans. |
 | [src/scan/pwa.ts](src/scan/pwa.ts) | Registers the worker and offers **Install** (Android/desktop Chrome) or the Share → Add to Home Screen hint (iOS). During capture it requests fullscreen, locks portrait and keeps the screen awake. |
-| [public/brand/](public/brand) | The logo: a T-pose figure, the app's scan pose, with a tape ring at the waist. Includes 192/512, maskable and Apple touch icons, and a share card. `scripts/make-icons.ts` re-renders the PNGs from the SVGs. |
+| [public/brand/](public/brand) | The logo: a T-pose figure, the app's scan pose, with a tape ring at the waist, in greyscale. Includes 192/512, maskable and Apple touch icons, and a share card. `scripts/make-icons.ts` re-renders the PNGs from the SVGs. |
 
 On phones the capture screen fills the display. The guidance sits above the camera and the controls below it, so the whole frame, head to feet, stays visible. The layout respects notch and home-bar safe areas.
 
-## One screen, game-style HUD
+## One screen, black and white
 
-The app is a single full-screen view. The camera feed, or after a scan the rotating 3D body, is always behind, and everything else is HUD on top:
+The app is a single full-screen view in plain greyscale, with high-contrast buttons: solid white with black text, or black with a white border.
 
-- **Start menu:** a holographic grid, the height input, mode cards (Helper lap / Solo spin / Quick) and START.
+- **Start menu:** height, mode (Helper / Solo / Quick) and a big Start button.
 - **Scanning:**
-  - a mission briefing and system-status pips (phones show only what needs fixing);
-  - target brackets and a sweeping scan line;
-  - **live AR callouts** on the body at every measurement level, with values that refine and lock green as the angles come in;
-  - a live-stats panel on wider screens, a coverage radar, and banners: TARGET ACQUIRED, countdown, FRONT LOCKED;
-  - FPS, tilt and views telemetry, plus game sounds as each 10° sector locks.
-- **Results:** the measured body spins as a hologram with neon girth rings. The headline stats roll up, and a translucent stat sheet holds every measurement, the camera-path radar, snapshots and exports. On phones the sheet slides up from the bottom and the body stays in the top half.
-
-Fonts (Rajdhani, Share Tech Mono; OFL) are self-hosted, so the HUD works offline and under the strict CSP.
+  - **The camera fills the whole screen.** On phones it covers the display edge to edge. A portrait feed on a landscape monitor is fitted instead, so the head and feet aren't cut off.
+  - The step and a one-line instruction float at the top. At the bottom are a status line that always names the one thing to fix, the coverage count, and two big buttons.
+  - Measurement tags are drawn on the body at each level and turn solid white once measured from all angles.
+  - Wide screens also show the check list and a live readout.
+- **Results:** the measured body rotates in 3D behind the numbers. On phones it fills the top half, and the stat sheet (every measurement, camera path, snapshots, exports) fills the bottom half.
 
 ## How a scan works: arms out, the whole time
 
@@ -107,13 +104,13 @@ Latest run (166.6 cm body; MediaPipe figures vary a little between runs):
 
 | | Chest | Waist | Hip | Thigh | Knee | Calf | Ankle | Neck | Upper arm | Inseam | Camera path |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Walk-around, MediaPipe in the room | +0.9% | +1.9% | +2.7% | +4.1% | −0.3% | +0.3% | +2.1% | +14% | +0.9% | −3.6 cm | 4.4° angle, 1.5 cm height, 5 cm distance |
-| Walk-around, oracle | +0.2% | +0.1% | −0.1% | +1.2% | −1.1% | −1.8% | −3.4% | +1.8% | +0.8% | −1.5 cm | 0.5° angle, 1.0 cm height, 10 cm distance |
-| Turn on the spot, oracle | −0.7% | −0.4% | −0.4% | +1.1% | −1.4% | −1.7% | −3.5% | +0.7% | +4.4% | −1.3 cm | |
+| Walk-around, MediaPipe in the room | −1.5% | +1.7% | +3.1% | +3.0% | +6.8% | +3.5% | +2.8% | +26.9% | +3.0% | −3.5 cm | 4.3° angle, 1.6 cm height, 5 cm distance |
+| Walk-around, oracle | −1.8% | +0.1% | +0.1% | +0.2% | −2.9% | −0.8% | −4.2% | +10.4% | +0.1% | −1.3 cm | 0.5° angle, 1.1 cm height, 10 cm distance |
+| Turn on the spot, oracle | −0.7% | −0.4% | −0.4% | +1.1% | −1.4% | −1.7% | −3.5% | +0.7% | +4.4% | −1.3 cm | 0.4° angle, 1.1 cm height, 11 cm distance |
 
 The oracle rows isolate the geometry: perspective, leveling, the walk and the girth formula. The MediaPipe row adds the ML model's segmentation and landmark error against a cluttered room. Its mask runs slightly wide.
 
-The front-only neck estimate is the weakest number, especially from a handheld front view at chest height. Across runs the walk-around oracle's chest has ranged from −4% to 0% and its neck from +2% to +16%: with arms out, this body's chest girth changes about 1.7 cm per centimetre of height just below the armpits, so the exact front frame chosen matters. Torso levels in walk-around frames are placed between that frame's own shoulder- and hip-joint landmarks, which keeps that spread small.
+The front-only neck estimate is the weakest number, especially from a handheld front view at chest height. Across runs the walk-around oracle's chest has ranged from about −4.5% to 0% and its neck from +2% to +16%: with arms out, this body's chest girth changes about 1.7 cm per centimetre of height just below the armpits, so the exact front frame chosen matters. Torso levels in walk-around frames are placed between that frame's own shoulder- and hip-joint landmarks, which keeps that spread small.
 
 Camera distance is the least certain part of the path. It assumes a typical 68° phone lens, while the simulated lens is 66°; MetricTrail estimates the intrinsics instead. Only the camera path depends on that lens guess; the measurements don't.
 
@@ -127,8 +124,8 @@ A rendered mannequin is not a person in clothes, so real-world error will be lar
 | `src/scan/geometry.ts`, `mask.ts` | Ellipse/Cauchy perimeters; sub-pixel runs, chords, connected vertical extent |
 | `src/scan/quality.ts` | Live capture checks, including arms out |
 | `src/scan/pose-mediapipe.ts`, `feeds.ts` | Self-hosted MediaPipe, camera feed, tilt |
-| `src/scan/main.ts`, `index.html`, `scan.css` | The full-screen game view: start menu, scanning HUD, results sheet |
-| `src/scan/ar.ts` | Live AR callouts: measurement levels placed through each frame's joints, with running values |
+| `src/scan/main.ts`, `index.html`, `scan.css` | The full-screen view: start menu, scanning overlay, results sheet |
+| `src/scan/ar.ts` | Live measurement tags: levels placed through each frame's joints, with running values |
 | `src/scan/pwa.ts`, `public/manifest.webmanifest`, `scripts/service-worker.ts` | Installable app: install prompt, fullscreen and wake lock, offline cache |
 | `src/scan/view3d.ts`, `capture-package.ts` | 3D cross-sections (with the true mesh in simulation); zip export for splatting |
 | `src/scan/synthetic.ts` | Orthographic parametric body for fast geometry unit tests |
