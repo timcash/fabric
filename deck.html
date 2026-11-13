@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#080b10" />
+    <meta name="description" content="Five interactive examples for a reusable Vite, TypeScript, and Three.js slide interface. Explore navigation, editable scenes, playback, and a guide." />
+    <meta property="og:title" content="Slide Template — One canvas. Five possibilities." />
+    <meta property="og:description" content="An interactive starting point for stories in three dimensions." />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="/fabric/favicon.svg" type="image/svg+xml" />
+    <title>Slide Template — Five interactive examples</title>
+    <script type="module" crossorigin src="/fabric/assets/deck-CwF3ft0X.js"></script>
+    <link rel="modulepreload" crossorigin href="/fabric/assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="modulepreload" crossorigin href="/fabric/assets/three-Cbg_9RFy.js">
+    <link rel="modulepreload" crossorigin href="/fabric/assets/OrbitControls-DhYidKTP.js">
+    <link rel="stylesheet" crossorigin href="/fabric/assets/deck-CHc9NDxb.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#slide-title">Skip to slide</a>
+    <div id="scene" aria-hidden="true"></div>
+    <div class="scene-shade" aria-hidden="true"></div>
+    <header class="masthead">
+      <a class="wordmark" id="home" href="#welcome" aria-label="Slide Template home">SLIDE<span>TEMPLATE</span></a>
+      <div class="header-tools"><a class="guide-link" id="open-scan" href="./">Body scan <span aria-hidden="true">↗</span></a><button id="start-walkthrough" class="mode-toggle" aria-pressed="false" title="Controls walkthrough (W)">Tour</button><button id="mode-toggle" class="mode-toggle" aria-pressed="false">DAG mode</button><button class="guide-link" id="open-guide">Guide <span aria-hidden="true">↗</span></button></div>
+    </header>
+    <main>
+      <section class="slide" aria-labelledby="slide-title" aria-roledescription="slide">
+        <div class="eyebrow"><span class="status-dot" aria-hidden="true"></span> INTERACTIVE STARTER <span class="divider">/</span> FIVE EXAMPLES</div>
+        <div class="slide-copy" aria-live="polite" aria-atomic="true">
+          <p class="slide-label" id="slide-label">01 — THE STARTING POINT</p>
+          <h1 id="slide-title" tabindex="-1">One canvas.<br /><span>Five possibilities.</span></h1>
+          <p class="description" id="slide-description">A starting point for stories in three dimensions. Explore five examples, then make the content, models, and motion your own.</p>
+          <dl class="slide-facts" id="slide-facts"></dl>
+          <p class="footnote" id="slide-note">Scroll once or press → to begin. Drag the scene to look around.</p>
+        </div>
+        <button class="slide-action" id="slide-action">Explore the examples <span aria-hidden="true">↗</span></button>
+        <button class="slide-secondary" id="reset-graph" hidden>Reset graph</button>
+      </section>
+      <div class="scene-caption" aria-hidden="true"><span class="caption-cross">+</span><span id="scene-caption">MODULAR ASSEMBLY<span>EXAMPLE / 01</span></span></div>
+      <p class="scene-fallback" id="scene-fallback" hidden>The 3D view is unavailable on this device. Slides, controls, and the guide are still available.</p>
+      <p class="sr-only" id="interaction-status" role="status" aria-live="polite"></p>
+      <section id="dag-header" class="dag-header" hidden aria-labelledby="dag-title">
+        <div class="dag-heading"><h1 id="dag-title">Slides, connected.</h1><span id="dag-depth">Root workplane</span></div>
+        <nav id="dag-breadcrumb" aria-label="Workplane path"></nav>
+        <p id="dag-selection" role="status" aria-live="polite"></p>
+        <nav id="dag-node-list" class="sr-only" aria-label="Slide graph nodes"></nav>
+      </section>
+    </main>
+    <footer class="navigation">
+      <div class="navigation-heading"><span id="slide-count">01 / 05</span><span class="nav-hint">Scroll to explore <span aria-hidden="true">↓</span></span></div>
+      <nav class="slide-progress" id="slide-progress" aria-label="Example slides"></nav>
+      <div class="transport">
+        <button id="previous" aria-label="Previous slide" disabled>↑</button>
+        <button id="play" aria-label="Play automatic tour" aria-pressed="false"><span id="play-icon" aria-hidden="true">▷</span><span id="play-label">Play tour</span></button>
+        <button id="next" aria-label="Next slide">↓</button>
+      </div>
+    </footer>
+    <div id="dag-controls" class="dag-controls" hidden>
+      <span class="dag-help">N: open · T: parent · C: create · X: color · ?: all hotkeys</span>
+      <div class="dag-buttons">
+        <button id="dag-parent">↑ Parent</button><button id="dag-overview">Root</button>
+        <button id="dag-zoom-out" aria-label="Zoom out">−</button><button id="dag-zoom-in" aria-label="Zoom in">+</button>
+        <label class="sr-only" for="dag-lod">Detail level</label><select id="dag-lod" aria-label="Detail level"><option value="auto">Frame node</option><option value="0">Points</option><option value="1">Summaries</option><option value="2">Full content</option></select>
+        <button id="dag-enter">Open node</button><button id="dag-create">Create</button><button id="dag-remove">Delete</button><button id="dag-trace" aria-pressed="false">Trace</button><button id="dag-present">Present</button>
+      </div>
+    </div>
+    <aside id="walkthrough" hidden aria-label="Controls walkthrough">
+      <div class="walkthrough-meta"><span id="walkthrough-count"></span><kbd id="walkthrough-input"></kbd><button id="stop-walkthrough">Stop / close</button></div>
+      <h2 id="walkthrough-title"></h2><p id="walkthrough-instruction" aria-live="polite"></p>
+    </aside>
+    <dialog id="guide-dialog" aria-labelledby="guide-title">
+      <div class="guide-toolbar"><span id="guide-title">THE TEMPLATE GUIDE</span><button id="close-guide" aria-label="Close guide">Close <span aria-hidden="true">×</span></button></div>
+      <article id="guide-content"></article>
+    </dialog>
+    <noscript><article class="no-script"><h1>Slide Template</h1><p>Five examples: an opening scene, slide navigation, an editable graph, automatic playback, and a content guide.</p><p><a href="/guide.md">Read the guide</a>, or enable JavaScript to use the interactive examples.</p></article></noscript>
+  </body>
+</html>

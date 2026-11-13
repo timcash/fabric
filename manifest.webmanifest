@@ -1,0 +1,23 @@
+{
+  "id": "./",
+  "name": "Fabric Body Scan",
+  "short_name": "Fabric Scan",
+  "description": "Measure a body with your phone camera: arms out, one walk around, computed on the device.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["health", "lifestyle", "utilities"],
+  "icons": [
+    { "src": "brand/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "brand/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "brand/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Simulate a scan", "short_name": "Simulate", "url": "./?sim=1", "icons": [{ "src": "brand/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
